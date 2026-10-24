@@ -1,0 +1,83 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+[RequireComponent(typeof(CharacterController))]
+
+public class SC_FPSController : MonoBehaviour
+{
+    public float walkingSpeed = 3f;
+    public float runningSpeed = 4f;
+    public float jumpSpeed = 0f;
+    public float gravity = 20.0f;
+    public Camera playerCamera;
+    public float lookSpeed = 2.0f;
+    public float lookXLimit = 75.0f;
+
+    CharacterController characterController;
+    Vector3 moveDirection = Vector3.zero;
+    float rotationX = 0;
+
+    [HideInInspector]
+    public bool canMove = true;
+
+    void Start()
+    {
+        characterController = GetComponent<CharacterController>();
+
+        // Lock cursor
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+
+        // Triệt tiêu hoàn toàn góc nghiêng ban đầu, giữ nhân vật đứng thẳng 100%
+        transform.rotation = Quaternion.Euler(0, transform.eulerAngles.y, 0);
+        if (playerCamera != null)
+        {
+            rotationX = playerCamera.transform.localEulerAngles.x;
+            if (rotationX > 180f) rotationX -= 360f;
+            playerCamera.transform.localRotation = Quaternion.Euler(rotationX, 0, 0);
+        }
+    }
+
+    void Update()
+    {
+        // We are grounded, so recalculate move direction based on axes
+        Vector3 forward = transform.TransformDirection(Vector3.forward);
+        Vector3 right = transform.TransformDirection(Vector3.right);
+        // Press Left Shift to run
+        bool isRunning = Input.GetKey(KeyCode.LeftShift);
+        float curSpeedX = canMove ? (isRunning ? runningSpeed : walkingSpeed) * Input.GetAxis("Vertical") : 0;
+        float curSpeedY = canMove ? (isRunning ? runningSpeed : walkingSpeed) * Input.GetAxis("Horizontal") : 0;
+        float movementDirectionY = moveDirection.y;
+        moveDirection = (forward * curSpeedX) + (right * curSpeedY);
+
+        if (Input.GetButton("Jump") && canMove && characterController.isGrounded)
+        {
+            moveDirection.y = jumpSpeed;
+        }
+        else
+        {
+            moveDirection.y = movementDirectionY;
+        }
+
+        // Apply gravity
+        if (!characterController.isGrounded)
+        {
+            moveDirection.y -= gravity * Time.deltaTime;
+        }
+
+        // Move the controller
+        characterController.Move(moveDirection * Time.deltaTime);
+
+        // Player and Camera rotation — Đảm bảo góc nhìn luôn thẳng đứng, không bao giờ bị nghiêng ngả
+        if (canMove)
+        {
+            rotationX += -Input.GetAxis("Mouse Y") * lookSpeed;
+            rotationX = Mathf.Clamp(rotationX, -lookXLimit, lookXLimit);
+            playerCamera.transform.localRotation = Quaternion.Euler(rotationX, 0, 0);
+
+            float rotationY = transform.eulerAngles.y + Input.GetAxis("Mouse X") * lookSpeed;
+            transform.rotation = Quaternion.Euler(0, rotationY, 0);
+        }
+    }
+}
