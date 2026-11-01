@@ -64,11 +64,17 @@ public class AAH_AutoDoor : MonoBehaviour
             rotation * _closedRotation);
     }
 
+    public void OpenForPatient()
+    {
+        if (_door == null || _hinge == null) return;
+        _isOpen = true;
+        if (_prompt != null) _prompt.SetActive(false);
+    }
+
     private void OnInteract(UnityEngine.InputSystem.InputAction.CallbackContext context)
     {
         if (!CanInteract) return;
-        _isOpen = true;
-        if (_prompt != null) _prompt.SetActive(false);
+        OpenForPatient();
     }
 
     private void OnDisable()

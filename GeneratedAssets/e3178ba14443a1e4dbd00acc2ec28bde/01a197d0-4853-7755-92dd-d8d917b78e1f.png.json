@@ -1,0 +1,41 @@
+{
+    "asset": "e3178ba14443a1e4dbd00acc2ec28bde",
+    "fileName": "01a197d0-4853-7755-92dd-d8d917b78e1f.png",
+    "prompt": "Create a clean isolated reference image of ONLY the small reception desk service bell seen on the counter near the bottom left in the provided screenshot. Single complete bell, three-quarter view slightly from above: squat polished silver dome, small silver push button centered on top, thin circular black base with a silver rim. Stylized low-poly 3D horror-game prop, simple clean geometry. No counter, no room, no shutter, no text, no other objects. Entire bell visible, centered on plain white background, studio lighting, suitable for image-to-3D reconstruction.",
+    "negativePrompt": "",
+    "model": "gemini-3.1-flash",
+    "modelName": "Gemini 3.1 Nano Banana 2",
+    "customSeed": -1,
+    "w3CTraceId": "",
+    "feedback": 0,
+    "refinementMode": "Generation",
+    "pixelateTargetSize": 0,
+    "pixelateKeepImageSize": false,
+    "pixelatePixelBlockSize": 0,
+    "pixelatePixelGridSize": 0,
+    "pixelateMode": 0,
+    "pixelateOutlineThickness": 0,
+    "doodles": {
+        "m_Items": [
+            {
+                "doodleReferenceType": 7,
+                "doodle": [],
+                "label": "Image",
+                "strength": 0.25,
+                "invertStrength": false,
+                "assetReferenceGuid": "1d66559eebe4f7d4d95ae281336544fd",
+                "unlabeledIndex": -1
+            }
+        ]
+    },
+    "upscaleFactor": 0,
+    "dimensions": {
+        "width": 1024,
+        "height": 1024
+    },
+    "spriteSheet": false,
+    "duration": 0.0,
+    "dynamicParams": {
+        "serializedData": []
+    }
+}

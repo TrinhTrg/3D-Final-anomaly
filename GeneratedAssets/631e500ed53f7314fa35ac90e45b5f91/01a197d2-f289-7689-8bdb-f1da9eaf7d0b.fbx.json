@@ -1,0 +1,23 @@
+{
+    "asset": "631e500ed53f7314fa35ac90e45b5f91",
+    "fileName": "01a197d2-f289-7689-8bdb-f1da9eaf7d0b.fbx",
+    "prompt": "Single stylized low-poly reception service desk bell matching reference. Silver metal squat dome, small centered top push button, black circular base and silver rim. Upright with base on ground, game-ready prop, no additional objects.",
+    "negativePrompt": "",
+    "model": "model3d-tripo-p2",
+    "modelName": "Tripo P2",
+    "customSeed": -1,
+    "w3CTraceId": "",
+    "feedback": 0,
+    "refinementMode": "Generation",
+    "promptImageReferenceGuid": "e3178ba14443a1e4dbd00acc2ec28bde",
+    "modelReferenceGuid": "",
+    "multiviewFrontGuid": "",
+    "multiviewBackGuid": "",
+    "multiviewLeftGuid": "",
+    "multiviewRightGuid": "",
+    "multiviewTopGuid": "",
+    "multiviewBottomGuid": "",
+    "multiviewLeftFrontGuid": "",
+    "multiviewRightFrontGuid": "",
+    "faceLimit": -1
+}
