@@ -138,6 +138,25 @@ public class AAH_PatientActor : MonoBehaviour
         _visual.position += new Vector3(centre.x - b.center.x, room.bedPose.position.y - b.min.y, centre.z - b.center.z);
         State = PatientState.AtBed; _registry.Occupy(PatientId, room.roomNumber);
     }
+    public void LeaveHospital(Transform exit)
+    {
+        if (State != PatientState.AtBed || exit == null) return;
+        StartCoroutine(DischargeRoutine(exit));
+    }
+    private IEnumerator DischargeRoutine(Transform exit)
+    {
+        State = PatientState.Leaving;
+        _visual.localRotation = _uprightModelRotation;
+        _visual.localPosition = Vector3.zero;
+        var bounds = VisualBounds;
+        _visual.position += transform.position - new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
+        _agent.enabled = true;
+        _agent.updateRotation = true;
+        yield return MoveTo(exit.position);
+        if (_moveFailed) yield break;
+        if (_registry != null) _registry.ReleaseRoom(PatientId);
+        gameObject.SetActive(false);
+    }
     public bool IsAwayFrom(Vector3 point) => Vector3.Distance(transform.position, point) > 4f;
     private void OnDisable() { StopAllCoroutines(); }
 }

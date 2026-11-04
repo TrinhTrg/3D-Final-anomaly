@@ -832,7 +832,7 @@ PlayerSettings:
   webGLCloseOnQuit: 0
   webWasm2023: 0
   scriptingDefineSymbols:
-    Standalone: SENTIS_ANALYTICS_ENABLED
+    Standalone: SENTIS_ANALYTICS_ENABLED;APP_UI_EDITOR_ONLY
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:
@@ -937,11 +937,11 @@ PlayerSettings:
   captureStartupLogs: {}
   activeInputHandler: 2
   windowsGamepadBackendHint: 0
-  cloudProjectId: 16595a22-f9bc-494d-af6e-eb77e68f9c83
+  cloudProjectId: ef4e796c-b33d-4846-93ef-3dfbaf8e6296
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: Horror Game (1)
-  organizationId: gaxuongban
+  projectName: Horror Game
+  organizationId: truongtrinhttt147
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}

@@ -68,6 +68,9 @@ public class AAH_CheckInSequence : MonoBehaviour
     public GameObject panelComputerRegister;
     public Slider sliderRegisterProgress;
     public TextMeshProUGUI txtRegisterStatus;
+    [Header("Reception monitor")]
+    [SerializeField] private UnityEngine.UI.Image _receptionProgress;
+    [SerializeField] private TMPro.TMP_Text _receptionStatus;
 
     [Header("UI - Step 4: Printer")]
     public GameObject panelPrinterCard;
@@ -129,6 +132,8 @@ public class AAH_CheckInSequence : MonoBehaviour
     }
     private void ResetSteps()
     {
+        if (_receptionProgress != null) _receptionProgress.fillAmount = 0f;
+        if (_receptionStatus != null) _receptionStatus.text = "CHỜ ĐĂNG KÝ\n0%";
         foreach (var step in new[] { stepBell, stepClipboard, stepCameraTripod, stepComputer, stepPrinter })
             if (step != null) step.ResetForPatient();
     }
@@ -276,7 +281,17 @@ public class AAH_CheckInSequence : MonoBehaviour
         panelComputerRegister.SetActive(true); txtRegisterStatus.text = "REGISTERING..."; sliderRegisterProgress.value = 0;
         PlaySound(soundComputerBeep);
         float elapsed = 0f;
-        while (elapsed < registerDuration) { elapsed += Time.deltaTime; sliderRegisterProgress.value = Mathf.Clamp01(elapsed / registerDuration); yield return null; }
+        while (elapsed < registerDuration)
+        {
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / registerDuration);
+            sliderRegisterProgress.value = progress;
+            if (_receptionProgress != null) _receptionProgress.fillAmount = progress;
+            if (_receptionStatus != null) _receptionStatus.SetText("ĐANG ĐĂNG KÝ\n{0:0}%", progress * 100f);
+            yield return null;
+        }
+        if (_receptionProgress != null) _receptionProgress.fillAmount = 1f;
+        if (_receptionStatus != null) _receptionStatus.text = "ĐĂNG KÝ HOÀN TẤT\n100%";
         txtRegisterStatus.text = "REGISTERED"; yield return new WaitForSeconds(0.7f);
         panelComputerRegister.SetActive(false); stepComputer.MarkCompleted(); _busy = false;
         SetStep(CheckInStep.Step4_PrinterRoomCard); _operation = null;
