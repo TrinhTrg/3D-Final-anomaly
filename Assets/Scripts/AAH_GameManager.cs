@@ -30,6 +30,8 @@ public class AAH_GameManager : MonoBehaviour
     public TextMeshProUGUI txtAnomalyCount;
     public GameObject panelShiftEnd;
     public TextMeshProUGUI txtShiftResult;
+    [Header("Client list screen")]
+    [SerializeField] private TMPro.TMP_Text _clientListText;
 
     [Header("State")]
     public bool shiftActive = true;
@@ -108,6 +110,8 @@ public class AAH_GameManager : MonoBehaviour
 
     void UpdateUI()
     {
+        if (_clientListText != null)
+            _clientListText.SetText("CHECK IN PATIENTS\n\nSHIFT TODAY - DAY {0:0}\nNORMAL ANIMALS\n<size=160%>{1:0}</size>", currentDay, Mathf.Max(0, patientsToInspect - anomaliesPresent));
         if (txtShiftLabel != null)
             txtShiftLabel.text = $"SHIFT {currentDay}";
 
