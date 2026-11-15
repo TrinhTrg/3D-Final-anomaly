@@ -1,0 +1,24 @@
+{
+  "locale": "vi",
+  "strings": {
+    "character_selection.title": "CHỌN NHÂN VẬT",
+    "character_selection.subtitle": "Chọn bác sĩ đồng hành trong ca trực của bạn.",
+    "character_selection.selected": "ĐÃ CHỌN",
+    "character_selection.back": "QUAY LẠI",
+    "character_selection.start": "BẮT ĐẦU",
+    "character_selection.preview": "Bản xem trước UI - chưa kết nối gameplay.",
+    "character_selection.confirmation": "Đã chọn {0}. Chưa bắt đầu trò chơi.",
+    "characters.cat.name": "Mèo",
+    "characters.cat.ability": "Chuyên gia chẩn đoán",
+    "characters.cat.description": "Quét anomaly nhanh hơn.",
+    "characters.mouse.name": "Chuột",
+    "characters.mouse.ability": "Hỗ trợ y tế",
+    "characters.mouse.description": "Hồi phục chỉ số Tỉnh táo hiệu quả hơn.",
+    "characters.deer.name": "Hươu",
+    "characters.deer.ability": "Cơ động",
+    "characters.deer.description": "Di chuyển nhanh hơn, tiêu hao ít thể lực hơn.",
+    "characters.dog.name": "Chó",
+    "characters.dog.ability": "Quản lý vật tư",
+    "characters.dog.description": "Mang được nhiều vật tư hơn."
+  }
+}

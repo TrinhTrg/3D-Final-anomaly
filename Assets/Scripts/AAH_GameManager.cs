@@ -30,12 +30,121 @@ public class AAH_GameManager : MonoBehaviour
     public TextMeshProUGUI txtAnomalyCount;
     public GameObject panelShiftEnd;
     public TextMeshProUGUI txtShiftResult;
+    [SerializeField] private TMPro.TMP_Text _earnedCoinsText;
     [Header("Client list screen")]
     [SerializeField] private TMPro.TMP_Text _clientListText;
 
     [Header("State")]
     public bool shiftActive = true;
     public bool shiftEnded = false;
+    [Header("Day 1 story completion")]
+    [SerializeField] private bool _requireDay1Story;
+    private string _day1Objective = "Ngày 1: Tiếp nhận, khám và điều trị cho Polly.";
+    [Header("Shift report gameplay sources")]
+    [SerializeField] private AAH_CheckInSequence _reportCheckIn;
+    [SerializeField] private AAH_RoomTreatmentSequence[] _reportTreatmentRooms;
+    private readonly HashSet<string> _treatedPatientIds = new HashSet<string>();
+    private readonly HashSet<string> _acceptedPatientIds = new HashSet<string>();
+    public int PatientsTreated => _treatedPatientIds.Count;
+    public int PatientsAccepted => _acceptedPatientIds.Count;
+    private readonly HashSet<string> _visitorIds = new HashSet<string>();
+    private readonly HashSet<string> _rejectedAnomalyIds = new HashSet<string>();
+    private readonly HashSet<string> _deadPatientIds = new HashSet<string>();
+    [Header("Existing reward rates")]
+    [SerializeField, Min(0)] private int _coinsPerTreatment = 10;
+    [SerializeField, Min(0)] private int _coinsPerBlockedAnomaly = 15;
+    [SerializeField, Min(0)] private int _coinsPerCompletedShift = 20;
+    [SerializeField, Min(0)] private int _coinsForZeroDeaths = 10;
+    private IAAH_CoinWallet _coinWallet;
+    private string _coinShiftId;
+    public int TotalAnimalCoins => _coinWallet != null ? _coinWallet.Balance : 0;
+    public int TotalVisitors => _visitorIds.Count;
+    public int BlockedAnomalies => _rejectedAnomalyIds.Count;
+    public int PatientDeaths => Mathf.Max(_deadPatientIds.Count, _coinWallet != null ? _coinWallet.GetShiftDeaths(_coinShiftId) : 0);
+    public int EarnedAnimalCoins => _coinWallet != null ? _coinWallet.GetShiftEarnings(_coinShiftId) : 0;
+    private void AwardCoins(string outcomeId, int amount)
+    {
+        if (_coinWallet != null && !string.IsNullOrEmpty(_coinShiftId))
+            _coinWallet.TryAward(_coinShiftId + ":" + outcomeId, _coinShiftId, amount);
+    }
+    private void AwardShiftCompletion()
+    {
+        AwardCoins("shift-completed", _coinsPerCompletedShift);
+        if (PatientDeaths == 0) AwardCoins("zero-deaths", _coinsForZeroDeaths);
+    }
+    public string PerformanceRating
+    {
+        get
+        {
+            if (TotalVisitors == 0) return "CHƯA CÓ DỮ LIỆU";
+            float successRate = (PatientsTreated + BlockedAnomalies) / (float)TotalVisitors;
+            if (PatientDeaths == 0 && successRate >= 0.9f) return "XUẤT SẮC";
+            if (successRate >= 0.7f) return "TỐT";
+            if (successRate >= 0.5f) return "TRUNG BÌNH";
+            return "CẦN CẢI THIỆN";
+        }
+    }
+    // Outcome hooks: call only when the corresponding gameplay outcome actually occurs.
+    public void RecordVisitor(string visitorId)
+    {
+        if (!shiftEnded && !string.IsNullOrWhiteSpace(visitorId)) _visitorIds.Add(visitorId);
+    }
+    public void RecordAnomalyRejected(string visitorId)
+    {
+        if (shiftEnded || string.IsNullOrWhiteSpace(visitorId)) return;
+        _visitorIds.Add(visitorId);
+        _rejectedAnomalyIds.Add(visitorId);
+        AwardCoins("anomaly-rejected:" + visitorId, _coinsPerBlockedAnomaly);
+    }
+    public void RecordPatientDeath(string patientId)
+    {
+        if (shiftEnded || string.IsNullOrWhiteSpace(patientId)) return;
+        _visitorIds.Add(patientId);
+        _deadPatientIds.Add(patientId);
+        _treatedPatientIds.Remove(patientId);
+        if (_coinWallet != null) _coinWallet.RecordShiftDeath(_coinShiftId, patientId);
+    }
+    private void OnEnable()
+    {
+        if (_reportCheckIn != null) _reportCheckIn.OnPatientCheckedIn += CountCheckIn;
+        if (_reportTreatmentRooms != null) foreach (var room in _reportTreatmentRooms)
+            if (room != null) room.PatientRecovered += CountTreatment;
+    }
+    private void OnDisable()
+    {
+        if (_reportCheckIn != null) _reportCheckIn.OnPatientCheckedIn -= CountCheckIn;
+        if (_reportTreatmentRooms != null) foreach (var room in _reportTreatmentRooms)
+            if (room != null) room.PatientRecovered -= CountTreatment;
+    }
+    private void CountCheckIn(string patientName, int roomNumber)
+    {
+        if (!shiftEnded && _reportCheckIn != null && _reportCheckIn.CurrentPatient != null)
+        {
+            string id = _reportCheckIn.CurrentPatient.PatientId;
+            _acceptedPatientIds.Add(id);
+            RecordVisitor(id);
+        }
+    }
+    private void CountTreatment(AAH_PatientActor patient)
+    {
+        if (shiftEnded || patient == null || _deadPatientIds.Contains(patient.PatientId)) return;
+        _treatedPatientIds.Add(patient.PatientId);
+        RecordVisitor(patient.PatientId);
+        AwardCoins("patient-treated:" + patient.PatientId, _coinsPerTreatment);
+    }
+    public void SetDay1Objective(string text)
+    {
+        _day1Objective = text;
+        UpdateUI();
+    }
+    public void CompleteDay1Story()
+    {
+        if (!_requireDay1Story || currentDay != 1 || shiftEnded) return;
+        shiftEnded = true; shiftActive = false;
+        _day1Objective = "Ngày 1 hoàn tất.";
+        UpdateUI();
+        ShowShiftEndPanel();
+    }
 
     void Awake()
     {
@@ -45,6 +154,15 @@ public class AAH_GameManager : MonoBehaviour
             return;
         }
         Instance = this;
+        try
+        {
+            _coinWallet = AAH_CoinWallet.Current;
+            _coinShiftId = _coinWallet.GetOrCreateShift(currentDay);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("Animal Coins could not initialize: " + e.Message, this);
+        }
     }
 
     void Start()
@@ -69,6 +187,7 @@ public class AAH_GameManager : MonoBehaviour
 
     void CheckShiftComplete()
     {
+        if (_requireDay1Story && currentDay == 1) return;
         if (patientsInspected >= patientsToInspect && !shiftEnded)
         {
             shiftEnded = true;
@@ -85,6 +204,7 @@ public class AAH_GameManager : MonoBehaviour
 
     void ShowShiftEndPanel()
     {
+        if (shiftEnded) AwardShiftCompletion();
         if (panelShiftEnd != null)
         {
             panelShiftEnd.SetActive(true);
@@ -98,13 +218,16 @@ public class AAH_GameManager : MonoBehaviour
 
         if (txtShiftResult != null)
         {
-            int score = normalPatientsCleared * 10 + anomaliesDetected * 25;
-            txtShiftResult.text =
-                $"<b>SHIFT {currentDay} COMPLETE</b>\n\n" +
-                $"Patients Inspected: {patientsInspected}\n" +
-                $"Anomalies Detected: {anomaliesDetected}\n" +
-                $"Normal Cleared: {normalPatientsCleared}\n\n" +
-                $"<color=#FFD700>Score: {score} Animal Coins</color>";
+            txtShiftResult.text = "<size=125%><b>BÁO CÁO CA TRỰC</b></size>\nNgày " + currentDay + " - Ca trực " + currentDay
+                + "\n\n--------------------------\n\nBệnh nhân điều trị: <b>" + PatientsTreated
+                + "</b>\nTổng lượt khách: <b>" + TotalVisitors
+                + "</b>\nAnomaly từ chối: <b>" + BlockedAnomalies
+                + "</b>\nSố ca tử vong: <b>" + PatientDeaths
+                + "</b>\n\n--------------------------\n\nHiệu suất bệnh viện\n<color=#27874D><b>" + PerformanceRating
+                + "</b></color>\n\n<size=80%>Điều trị +10 | Từ chối +15\nHoàn tất ca +20 | Không tử vong +10</size>";
+            string earnedText = "<color=#996600><b>+" + EarnedAnimalCoins + " Animal Coins</b></color>";
+            if (_earnedCoinsText != null) _earnedCoinsText.text = earnedText;
+            else txtShiftResult.text += "\n\n" + earnedText;
         }
     }
 
@@ -117,7 +240,9 @@ public class AAH_GameManager : MonoBehaviour
 
         if (txtObjective != null)
         {
-            if (!shiftEnded)
+            if (_requireDay1Story && currentDay == 1)
+                txtObjective.text = _day1Objective;
+            else if (!shiftEnded)
                 txtObjective.text = $"Inspect patients at Reception\nInspected: {patientsInspected}/{patientsToInspect}";
             else
                 txtObjective.text = "Shift complete! Dr. Mupple is evaluating...";

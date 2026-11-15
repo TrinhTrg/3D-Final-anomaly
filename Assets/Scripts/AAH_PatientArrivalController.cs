@@ -4,6 +4,7 @@ using UnityEngine;
 public class AAH_PatientArrivalController : MonoBehaviour
 {
     [Header("Queue")]
+    [SerializeField] private AAH_GameManager _gameManager;
     [SerializeField] private AAH_CheckInSequence _sequence;
     [SerializeField] private AAH_RoomRegistry _rooms;
     [SerializeField] private AAH_PatientActor.PatientProfile[] _patients;
@@ -18,8 +19,8 @@ public class AAH_PatientArrivalController : MonoBehaviour
     private void Start()
     {
         string error;
-        if (_sequence == null || _rooms == null || !_rooms.ValidateConfiguration(out error) || _spawn == null || _entrance == null || _stand == null)
-        { Debug.LogError("Patient arrival configuration is incomplete.", this); enabled = false; return; }
+        if (_gameManager == null || _gameManager.currentDay < 1 || _sequence == null || _rooms == null || !_rooms.ValidateConfiguration(out error) || _spawn == null || _entrance == null || _stand == null)
+        { Debug.LogError("Patient arrival configuration is incomplete (day manager, room routes, or spawn references).", this); enabled = false; return; }
         StartCoroutine(QueueRoutine());
     }
     private IEnumerator QueueRoutine()
@@ -42,6 +43,7 @@ public class AAH_PatientArrivalController : MonoBehaviour
             agent.angularSpeed = 180f; agent.stoppingDistance = 0.15f; agent.baseOffset = 0f;
             var actor = go.AddComponent<AAH_PatientActor>();
             actor.Initialize(profile, "PAT-" + (_nextPatient + 1).ToString("D3"), _rooms, _doors);
+            actor.AssignIllness(_gameManager.currentDay, _nextPatient + 1);
             go.SetActive(true);
             if (!_sequence.BeginPatient(actor)) { Destroy(go); yield return null; continue; }
             _nextPatient++; actor.Approach(_entrance, _stand);

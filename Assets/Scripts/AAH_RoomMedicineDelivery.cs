@@ -25,6 +25,16 @@ public partial class AAH_RoomTreatmentSequence
     private int _focusedOrder = -1;
     private GameObject _focusedBottle;
     private Coroutine _recovery;
+    // Only one prescription can use the player's hands and guidance at a time.
+    // Analysis and recovery continue independently in every room.
+    private static AAH_RoomTreatmentSequence _deliveryOwner;
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetDeliveryOwner() { _deliveryOwner = null; }
+    private bool OwnsDelivery()
+    {
+        if (_deliveryOwner == null && Stage == TreatmentStage.CollectingMedicine) _deliveryOwner = this;
+        return _deliveryOwner == this;
+    }
     public int CollectedMedicineCount { get; private set; }
     public int DeliveredMedicineCount { get; private set; }
     public float TreatmentProgress { get; private set; }
@@ -39,14 +49,29 @@ public partial class AAH_RoomTreatmentSequence
     }
     private MedicineDisplayEntry ResolveMedicine(string medicine)
     {
-        if (_medicineCatalog == null || string.IsNullOrWhiteSpace(medicine)) return null;
-        foreach (var entry in _medicineCatalog)
+        var catalog = MedicineCatalog;
+        if (catalog == null || string.IsNullOrWhiteSpace(medicine)) return null;
+        foreach (var entry in catalog)
         {
-            if (entry == null || string.IsNullOrEmpty(entry.aliases)) continue;
+            if (entry == null) continue;
+            if (string.Equals(entry.label, medicine.Trim(), System.StringComparison.OrdinalIgnoreCase)) return entry;
+            if (string.IsNullOrEmpty(entry.aliases)) continue;
             foreach (var alias in entry.aliases.Split('|'))
                 if (string.Equals(alias.Trim(), medicine.Trim(), System.StringComparison.OrdinalIgnoreCase)) return entry;
         }
         return null;
+    }
+    private void ResetPatientDelivery()
+    {
+        DisableDelivery();
+        foreach (var order in _orders) if (order.held != null) Destroy(order.held);
+        _orders.Clear();
+        CollectedMedicineCount = DeliveredMedicineCount = 0;
+        TreatmentProgress = 0f;
+        _focusedOrder = -1; _focusedBottle = null;
+        if (_treatmentPanel != null) _treatmentPanel.SetActive(false);
+        if (_treatmentFill != null) _treatmentFill.fillAmount = 0f;
+        if (_treatmentStatus != null) _treatmentStatus.text = "";
     }
     private void InitializeDelivery()
     {
@@ -60,6 +85,10 @@ public partial class AAH_RoomTreatmentSequence
             foreach (var bottle in stock.bottles)
             {
                 if (bottle == null) continue;
+                bool hasPickup = false;
+                foreach (var existing in bottle.GetComponentsInChildren<Collider>(true))
+                    if (existing.name == "MedicinePickup") { hasPickup = true; break; }
+                if (hasPickup) continue;
                 var renderers = bottle.GetComponentsInChildren<Renderer>();
                 if (renderers.Length == 0) continue;
                 var bounds = renderers[0].bounds;
@@ -100,6 +129,7 @@ public partial class AAH_RoomTreatmentSequence
     private bool SelectDeliveryTarget()
     {
         _focusedOrder = -1; _focusedBottle = null;
+        if (!OwnsDelivery()) return false;
         if (_playerCamera == null || _patient == null || _patient.State != AAH_PatientActor.PatientState.AtBed || Time.timeScale <= 0f || (_checkIn != null && _checkIn.Busy)) return false;
         RaycastHit hit;
         if (!Physics.Raycast(_playerCamera.transform.position, _playerCamera.transform.forward, out hit, _rayDistance, ~0, QueryTriggerInteraction.Collide)) return false;
@@ -154,11 +184,15 @@ public partial class AAH_RoomTreatmentSequence
     }
     private void UpdateDelivery()
     {
-        bool active = Stage == TreatmentStage.CollectingMedicine;
+        bool active = Stage == TreatmentStage.CollectingMedicine && OwnsDelivery();
         if (_guideArrow != null) _guideArrow.gameObject.SetActive(active);
-        if (!active) return;
+        if (!active)
+        {
+            if (_guideText != null) _guideText.text = "";
+            return;
+        }
         Vector3 target = _patient.VisualBounds.center;
-        string instruction = "Về phòng 01, đặt thuốc cho bệnh nhân";
+        string instruction = "Về phòng " + _roomNumber.ToString("00") + ", đặt thuốc cho bệnh nhân";
         foreach (var order in _orders)
         {
             if (order.collected) continue;
@@ -184,6 +218,7 @@ public partial class AAH_RoomTreatmentSequence
     }
     private void StartRecovery()
     {
+        if (_deliveryOwner == this) _deliveryOwner = null;
         Stage = TreatmentStage.Treating;
         ShowMedicineImages(false);
         if (_medicineText != null) _medicineText.text = "";
@@ -211,11 +246,14 @@ public partial class AAH_RoomTreatmentSequence
         if (_treatmentPanel != null) _treatmentPanel.SetActive(false);
         if (_patientCollider != null) _patientCollider.enabled = false;
         Stage = TreatmentStage.Discharged;
+        if (_patient != null) PatientRecovered?.Invoke(_patient);
+        while (_patient != null && _patient.HoldDischarge) yield return null;
         if (_patient != null) _patient.LeaveHospital(_hospitalExit);
         _recovery = null;
     }
     private void DisableDelivery()
     {
+        if (_deliveryOwner == this) _deliveryOwner = null;
         if (_guideArrow != null) _guideArrow.gameObject.SetActive(false);
         if (_guideText != null) _guideText.text = "";
         if (_recovery != null) { StopCoroutine(_recovery); _recovery = null; }

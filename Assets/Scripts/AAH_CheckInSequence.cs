@@ -105,10 +105,52 @@ public class AAH_CheckInSequence : MonoBehaviour
     private Sprite _photoSprite;
     private Coroutine _operation;
     private Vector3 _clipboardDeskPosition;
-    public bool Busy => _busy || _modal;
+    [Header("Day 1 story")]
+    [SerializeField] private AAH_Day1Dialogue _day1Dialogue;
+    private bool _storyDialogue;
+    public bool Busy => _busy || _modal || _storyDialogue;
+    public IEnumerator ShowStoryDialogue(string speaker, AAH_Day1Dialogue data, AAH_Day1Dialogue.Line[] lines)
+    {
+        while (Busy || (panelDialogue != null && panelDialogue.activeSelf)) yield return null;
+        CancelAmbientDialogue();
+        _storyDialogue = true; SetStep(currentStep);
+        foreach (var line in lines)
+        {
+            txtDialogueContent.text = "<b>" + speaker + "</b>\n" + data.Resolve(line);
+            panelDialogue.SetActive(true);
+            yield return new WaitForSeconds(dialogueDuration);
+        }
+        panelDialogue.SetActive(false);
+        _storyDialogue = false; SetStep(currentStep);
+    }
     public bool HasPatient => _patient != null;
     public AAH_PatientActor CurrentPatient => _patient;
     public bool ReadyForPatient => isActiveAndEnabled && _patient == null && roomRegistry != null && roomRegistry.FreeCount > 0;
+    private Coroutine _ambientDialogue;
+    private string _ambientText;
+    public bool IsAmbientDialogueVisible => _ambientDialogue != null;
+    public bool TryShowAmbientDialogue(string speaker, string text, float duration)
+    {
+        if (!isActiveAndEnabled || Busy || Time.timeScale <= 0f || panelDialogue == null || txtDialogueContent == null || panelDialogue.activeSelf) return false;
+        _ambientDialogue = StartCoroutine(AmbientDialogueRoutine(speaker, text, duration));
+        return true;
+    }
+    private IEnumerator AmbientDialogueRoutine(string speaker, string text, float duration)
+    {
+        _ambientText = "<b>" + speaker + "</b>\n" + text;
+        txtDialogueContent.text = _ambientText;
+        panelDialogue.SetActive(true);
+        yield return new WaitForSeconds(Mathf.Max(0.1f, duration));
+        if (!Busy && txtDialogueContent != null && txtDialogueContent.text == _ambientText && panelDialogue != null) panelDialogue.SetActive(false);
+        _ambientDialogue = null; _ambientText = null;
+    }
+    public void CancelAmbientDialogue()
+    {
+        if (_ambientDialogue == null) return;
+        StopCoroutine(_ambientDialogue); _ambientDialogue = null;
+        if (!Busy && txtDialogueContent != null && txtDialogueContent.text == _ambientText && panelDialogue != null) panelDialogue.SetActive(false);
+        _ambientText = null;
+    }
 
     void Awake()
     {
@@ -140,6 +182,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     public bool BeginPatient(AAH_PatientActor patient)
     {
         if (!ReadyForPatient || patient == null) return false;
+        CancelAmbientDialogue();
         _reservedRoom = roomRegistry.Reserve(patient.PatientId);
         if (_reservedRoom == null) return false;
         _patient = patient; activePatientObject = patient.gameObject;
@@ -179,8 +222,19 @@ public class AAH_CheckInSequence : MonoBehaviour
         }
         _patient.SetDeskState(AAH_PatientActor.PatientState.Dialogue); SetStep(CheckInStep.PatientDialogue);
         if (panelDialogue != null) panelDialogue.SetActive(true);
-        if (txtDialogueContent != null) txtDialogueContent.text = "<b>" + patientName + "</b>\nI'm " + patientName + ". " + patientDialogue;
-        yield return new WaitForSeconds(dialogueDuration);
+        if (_day1Dialogue != null && AAH_GameManager.Instance != null && AAH_GameManager.Instance.currentDay == 1 && _patient.DisplayName == "Polly")
+        {
+            foreach (var line in _day1Dialogue.Arrival)
+            {
+                if (txtDialogueContent != null) txtDialogueContent.text = "<b>" + patientName + "</b>\n" + _day1Dialogue.Resolve(line);
+                yield return new WaitForSeconds(dialogueDuration);
+            }
+        }
+        else
+        {
+            if (txtDialogueContent != null) txtDialogueContent.text = "<b>" + patientName + "</b>\n" + patientDialogue;
+            yield return new WaitForSeconds(dialogueDuration);
+        }
         if (panelDialogue != null) panelDialogue.SetActive(false);
         _patient.SetDeskState(AAH_PatientActor.PatientState.CheckingIn);
         if (stepClipboard != null)

@@ -5,11 +5,15 @@ using UnityEngine;
 public partial class AAH_RoomTreatmentSequence : MonoBehaviour
 {
     public enum TreatmentStage { WaitingForBed, Patient, Scan, Computer, Analyzing, Completed, CollectingMedicine, Treating, Discharged }
-    [Header("Room 01 integration")]
+    [Header("Room integration")]
+    [SerializeField, Min(1)] private int _roomNumber = 1;
+    [Tooltip("Leave empty to accept any patient assigned to this room. Room 1 retains PAT-001.")]
+    [SerializeField] private string _patientId = "PAT-001";
     [SerializeField] private AAH_CheckInSequence _checkIn;
     [SerializeField] private Camera _playerCamera;
     [SerializeField] private Transform _player;
     [SerializeField] private Renderer _scan;
+    [SerializeField] private Collider _scanScreenCollider;
     [SerializeField] private Renderer _computer;
     [SerializeField] private Collider _computerScreenCollider;
     [SerializeField] private Material _outlineMaterial;
@@ -21,17 +25,22 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
     [SerializeField] private TMPro.TMP_Text _computerStatus;
     [SerializeField] private TMPro.TMP_Text _medicineText;
     [SerializeField] private TMPro.TMP_Text _prompt;
-    [Tooltip("Medicine names or symptoms for patient PAT-001. Only listed entries appear on the TV.")]
-    [SerializeField] private string[] _medicines = { "Tylenol", "Eye drops" };
+    // Generated from the current patient's illness, never serialized per room.
+    private string[] _medicines = System.Array.Empty<string>();
     [System.Serializable]
     private class MedicineDisplayEntry
     {
+        public AAH_PatientActor.IllnessType illness;
         public string aliases;
         public string label;
         public Texture2D image;
     }
     [Header("TV medicine images")]
+    [Tooltip("Rooms 2–5 read the canonical catalog on Room 1; screen references remain local.")]
+    [SerializeField] private AAH_RoomTreatmentSequence _medicineCatalogSource;
     [SerializeField] private MedicineDisplayEntry[] _medicineCatalog;
+    private MedicineDisplayEntry[] MedicineCatalog => _medicineCatalogSource != null && _medicineCatalogSource != this
+        ? _medicineCatalogSource._medicineCatalog : _medicineCatalog;
     [SerializeField] private UnityEngine.UI.RawImage[] _medicineImages;
     [SerializeField] private TMPro.TMP_Text[] _medicineLabels;
     private AAH_PatientActor _patient;
@@ -44,17 +53,20 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
     public TreatmentStage Stage { get; private set; }
     public float Progress { get; private set; }
     public bool IsFocused { get; private set; }
+    public AAH_PatientActor CurrentPatient => _patient;
+    public event System.Action<AAH_PatientActor> PatientRecovered;
+    public event System.Action<AAH_PatientActor> ExaminationStarted;
 
     private void Awake()
     {
-        _interact = new UnityEngine.InputSystem.InputAction("Room01Treatment", UnityEngine.InputSystem.InputActionType.Button, "<Keyboard>/e");
+        _interact = new UnityEngine.InputSystem.InputAction("Room" + _roomNumber.ToString("00") + "Treatment", UnityEngine.InputSystem.InputActionType.Button, "<Keyboard>/e");
         _interact.performed += HandleInteract;
         BuildOutline(new[] { _scan }, _scanOutline);
         BuildOutline(new[] { _computer }, _computerOutline);
         Stage = TreatmentStage.WaitingForBed;
         if (_progressFill != null) _progressFill.fillAmount = 0f;
         if (_computerStatus != null) _computerStatus.text = "CHỜ PHÂN TÍCH";
-        if (_medicineText != null) _medicineText.text = "PHÒNG 01\nCHỜ KẾT QUẢ PHÂN TÍCH";
+        if (_medicineText != null) _medicineText.text = "PHÒNG " + _roomNumber.ToString("00") + "\nCHỜ KẾT QUẢ PHÂN TÍCH";
         ShowMedicineImages(false);
         InitializeDelivery();
     }
@@ -65,13 +77,28 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
     }
     private void HandleCheckedIn(string patientName, int roomNumber)
     {
-        if (Stage != TreatmentStage.WaitingForBed || _patient != null || roomNumber != 1) return;
+        if (roomNumber != _roomNumber || _checkIn == null) return;
         var actor = _checkIn.CurrentPatient;
-        if (actor != null && actor.PatientId == "PAT-001") _patient = actor;
+        if (actor == null || actor == _patient || (!string.IsNullOrEmpty(_patientId) && actor.PatientId != _patientId)) return;
+        if (Stage != TreatmentStage.WaitingForBed && Stage != TreatmentStage.Discharged) return;
+        ResetPatientDelivery();
+        foreach (var outline in _patientOutline) if (outline != null) Destroy(outline);
+        _patientOutline.Clear();
+        if (_patientCollider != null) Destroy(_patientCollider.gameObject);
+        _patientCollider = null;
+        _patient = actor;
+        _medicines = System.Array.Empty<string>();
+        Progress = 0f; IsFocused = false; Stage = TreatmentStage.WaitingForBed;
+        SetOutline(_scanOutline, false); SetOutline(_computerOutline, false);
+        ShowMedicineImages(false);
+        if (_progressFill != null) _progressFill.fillAmount = 0f;
+        if (_computerStatus != null) _computerStatus.text = "CHỜ PHÂN TÍCH";
+        if (_medicineText != null) _medicineText.text = actor.DisplayName + " | " + actor.PatientId + "\nCHỜ KẾT QUẢ PHÂN TÍCH";
+        if (_prompt != null) _prompt.text = "";
     }
     private void Update()
     {
-        if (_patient != null && Stage == TreatmentStage.WaitingForBed && _patient.State == AAH_PatientActor.PatientState.AtBed && _patient.RoomNumber == 1)
+        if (_patient != null && Stage == TreatmentStage.WaitingForBed && _patient.State == AAH_PatientActor.PatientState.AtBed && _patient.RoomNumber == _roomNumber)
             PreparePatient();
         IsFocused = SelectTarget();
         SetOutline(_patientOutline, Stage == TreatmentStage.Patient && IsFocused);
@@ -103,8 +130,8 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
         RaycastHit hit;
         if (!Physics.Raycast(_playerCamera.transform.position, _playerCamera.transform.forward, out hit, _rayDistance, ~0, QueryTriggerInteraction.Collide)) return false;
         bool matches = Stage == TreatmentStage.Patient ? hit.collider == _patientCollider
-            : Stage == TreatmentStage.Scan ? hit.collider.transform == _scan.transform || hit.collider.transform.IsChildOf(_scan.transform)
-            : hit.collider == _computerScreenCollider || hit.collider.transform == _computer.transform || hit.collider.transform.IsChildOf(_computer.transform);
+            : Stage == TreatmentStage.Scan ? hit.collider == _scanScreenCollider || (_scan != null && (hit.collider.transform == _scan.transform || hit.collider.transform.IsChildOf(_scan.transform)))
+            : hit.collider == _computerScreenCollider || (_computer != null && (hit.collider.transform == _computer.transform || hit.collider.transform.IsChildOf(_computer.transform)));
         if (!matches) return false;
         var position = _player != null ? _player.position : _playerCamera.transform.position;
         var nearest = hit.collider.ClosestPoint(position); nearest.y = position.y;
@@ -114,7 +141,11 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
     {
         if (Stage == TreatmentStage.CollectingMedicine) { HandleMedicineInteraction(); return; }
         if (!SelectTarget()) return;
-        if (Stage == TreatmentStage.Patient) Stage = TreatmentStage.Scan;
+        if (Stage == TreatmentStage.Patient)
+        {
+            Stage = TreatmentStage.Scan;
+            ExaminationStarted?.Invoke(_patient);
+        }
         else if (Stage == TreatmentStage.Scan) Stage = TreatmentStage.Computer;
         else if (Stage == TreatmentStage.Computer)
         {
@@ -138,16 +169,35 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
         }
         Progress = 1f; UpdateProgress(); Stage = TreatmentStage.Completed;
         if (_computerStatus != null) _computerStatus.text = "HOÀN TẤT 100%";
+        bool hasPrescription = BuildPatientPrescription();
         if (_medicineText != null)
         {
             var text = new System.Text.StringBuilder("THUỐC CHO BỆNH NHÂN\n");
             text.Append(_patient.DisplayName).Append(" | ").Append(_patient.PatientId);
-            if (_medicines == null || _medicines.Length == 0) text.Append("\nKhông có thuốc được chỉ định.");
+            if (!hasPrescription) text.Append("\nChưa có thuốc cho chẩn đoán này.");
             _medicineText.text = text.ToString();
         }
-        ShowMedicineImages(true);
-        BeginMedicineDelivery();
+        ShowMedicineImages(hasPrescription);
+        // A missing diagnosis must never silently start recovery with zero medicine.
+        if (hasPrescription) BeginMedicineDelivery();
         _analysis = null;
+    }
+    private bool BuildPatientPrescription()
+    {
+        _medicines = System.Array.Empty<string>();
+        if (_patient == null || _patient.Illness == AAH_PatientActor.IllnessType.Unassigned) return false;
+        // The existing eye-drop entry handles both Dry Eyes and Day 1's Eye Pain.
+        var illness = _patient.Illness == AAH_PatientActor.IllnessType.EyePain
+            ? AAH_PatientActor.IllnessType.DryEyes : _patient.Illness;
+        var catalog = MedicineCatalog;
+        if (catalog == null) return false;
+        foreach (var entry in catalog)
+        {
+            if (entry == null || entry.illness != illness || entry.image == null || string.IsNullOrWhiteSpace(entry.label)) continue;
+            _medicines = new[] { entry.label };
+            return true;
+        }
+        return false;
     }
     private void ShowMedicineImages(bool show)
     {
@@ -165,19 +215,15 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
             image.gameObject.SetActive(visible);
             var label = _medicineLabels != null && i < _medicineLabels.Length ? _medicineLabels[i] : null;
             if (label != null) label.gameObject.SetActive(visible);
-            if (!visible) continue;
+            if (!visible)
+            {
+                image.texture = null; image.enabled = false;
+                if (label != null) label.text = "";
+                continue;
+            }
             while (string.IsNullOrWhiteSpace(_medicines[itemIndex])) itemIndex++;
             string medicine = _medicines[itemIndex++];
-            MedicineDisplayEntry entry = null;
-            if (_medicineCatalog != null)
-                foreach (var candidate in _medicineCatalog)
-                {
-                    if (candidate == null || string.IsNullOrEmpty(candidate.aliases)) continue;
-                    foreach (var alias in candidate.aliases.Split('|'))
-                        if (string.Equals(alias.Trim(), medicine.Trim(), System.StringComparison.OrdinalIgnoreCase))
-                        { entry = candidate; break; }
-                    if (entry != null) break;
-                }
+            MedicineDisplayEntry entry = ResolveMedicine(medicine);
             image.texture = entry != null ? entry.image : null;
             image.enabled = image.texture != null;
             // Center one medicine; arrange longer prescriptions in rows without stretching images.

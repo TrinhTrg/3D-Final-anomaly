@@ -6,14 +6,49 @@ using UnityEngine;
 public class AAH_PatientActor : MonoBehaviour
 {
     public enum PatientState { Approaching, WaitingAtDesk, Dialogue, CheckingIn, Leaving, AtBed, Blocked }
+    public enum IllnessType
+    {
+        Unassigned, Dehydration, Bruises, Fever, Stomachache, CommonCold,
+        DryEyes, SkinRash, Bleeding, Headache, Hypoglycemia, EyePain
+    }
+    private static readonly IllnessType[] RandomIllnesses =
+    {
+        IllnessType.Dehydration, IllnessType.Bruises, IllnessType.Fever,
+        IllnessType.Stomachache, IllnessType.CommonCold, IllnessType.DryEyes,
+        IllnessType.SkinRash, IllnessType.Bleeding, IllnessType.Headache,
+        IllnessType.Hypoglycemia
+    };
+    [Header("Patient diagnosis")]
+    [SerializeField] private IllnessType _illness = IllnessType.Unassigned;
+    public IllnessType Illness => _illness;
+
+    public void AssignIllness(int day, int patientNumber)
+    {
+        if (day < 1) throw new ArgumentOutOfRangeException(nameof(day));
+        if (patientNumber < 1) throw new ArgumentOutOfRangeException(nameof(patientNumber));
+        // Assignment belongs to this patient and never changes with its room or state.
+        if (_illness != IllnessType.Unassigned) return;
+        if (day == 1 && patientNumber <= 3)
+        {
+            _illness = patientNumber == 1 ? IllnessType.Stomachache
+                : patientNumber == 2 ? IllnessType.EyePain : IllnessType.Headache;
+            return;
+        }
+        _illness = RandomIllnesses[UnityEngine.Random.Range(0, RandomIllnesses.Length)];
+    }
+
     [Serializable]
     public class PatientProfile
     {
         public GameObject model;
         public string displayName = "Mai Yamada";
+        [Tooltip("Anomalous visitors must be refused at reception; normal Day 1 profiles remain false.")]
+        public bool isAnomaly;
         [Tooltip("Yaw correction for imported model facing direction")]
         public float facingCorrection = 180f;
-        [TextArea] public string dialogue = "I'm here for my appointment...";
+        [Tooltip("Stable string-table key for future localization; dialogue is the Vietnamese fallback.")]
+        public string dialogueKey = "patients.check_in.default";
+        [TextArea] public string dialogue = "Xin chào, tôi đến khám theo lịch hẹn.";
     }
     [SerializeField, Min(0.1f)] private float _height = 5.4f;
     [SerializeField, Min(1f)] private float _travelTimeout = 90f;
@@ -28,16 +63,22 @@ public class AAH_PatientActor : MonoBehaviour
     public string PatientId { get; private set; }
     public string DisplayName { get; private set; }
     public string Dialogue { get; private set; }
+    public string DialogueKey { get; private set; }
+    public bool IsAnomaly { get; private set; }
+    public bool IsRejected { get; private set; }
     public PatientState State { get; private set; }
     public int RoomNumber { get; private set; }
     public bool HasVacatedDesk { get; private set; }
     public Bounds VisualBounds { get { var b = _renderers[0].bounds; foreach (var r in _renderers) b.Encapsulate(r.bounds); return b; } }
     public event Action<AAH_PatientActor> ArrivedAtDesk;
     public event Action<AAH_PatientActor> NavigationFailed;
+    public event Action<AAH_PatientActor> LeftHospital;
+    public bool HoldDischarge { get; set; }
     private void Awake() { _agent = GetComponent<UnityEngine.AI.NavMeshAgent>(); }
     public void Initialize(PatientProfile profile, string id, AAH_RoomRegistry registry, AAH_PatientDoorAccess[] doors)
     {
         PatientId = id; DisplayName = profile.displayName; Dialogue = profile.dialogue; _registry = registry; _doors = doors;
+        DialogueKey = profile.dialogueKey; IsAnomaly = profile.isAnomaly; IsRejected = false;
         _visual = Instantiate(profile.model, transform).transform;
         _visual.localRotation = Quaternion.Euler(0f, profile.facingCorrection, 0f) * _visual.localRotation;
         _uprightModelRotation = _visual.localRotation;
@@ -155,6 +196,7 @@ public class AAH_PatientActor : MonoBehaviour
         yield return MoveTo(exit.position);
         if (_moveFailed) yield break;
         if (_registry != null) _registry.ReleaseRoom(PatientId);
+        LeftHospital?.Invoke(this);
         gameObject.SetActive(false);
     }
     public bool IsAwayFrom(Vector3 point) => Vector3.Distance(transform.position, point) > 4f;
