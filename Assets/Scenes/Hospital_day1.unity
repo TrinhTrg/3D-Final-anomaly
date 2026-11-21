@@ -4933,7 +4933,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2774220344278030320, guid: c9bcaf25f85503345a3da46f335449d7, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -49.06472
+      value: -30.23
       objectReference: {fileID: 0}
     - target: {fileID: 2774220344278030320, guid: c9bcaf25f85503345a3da46f335449d7, type: 3}
       propertyPath: m_LocalRotation.w
@@ -17946,7 +17946,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &486796489
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -43556,8 +43556,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1222736674}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: 1, z: -0, w: 0}
-  m_LocalPosition: {x: 168.17651, y: 2.85, z: -42.3786}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 168.17651, y: 2.65, z: -42.3786}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -73992,8 +73992,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3aed94c30d34e5a468c0f21b1e23479a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  walkingSpeed: 5.3999996
-  runningSpeed: 9
+  walkingSpeed: 8.5
+  runningSpeed: 11.4
   jumpSpeed: 0
   gravity: 20
   playerCamera: {fileID: 811398575}

@@ -13,7 +13,7 @@ public class AAH_PatientArrivalController : MonoBehaviour
     [SerializeField] private Transform _stand;
     [SerializeField] private AAH_PatientDoorAccess[] _doors;
     [SerializeField, Min(0f)] private float _arrivalDelay = 4f;
-    [SerializeField, Min(0.1f)] private float _walkingSpeed = 6f;
+    [SerializeField, Min(0.1f)] private float _walkingSpeed = 9f;
     [SerializeField] private int _agentTypeId;
     private int _nextPatient;
     private void Start()

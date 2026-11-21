@@ -19,6 +19,23 @@ public class menuScript : MonoBehaviour
     [SerializeField] private TMPro.TMP_InputField _roomNameInput;
     [SerializeField] private TMPro.TMP_Text _createRoomStatus;
     [SerializeField] private CanvasGroup _lobbyCanvasGroup;
+    [Header("Waiting Room UI")]
+    [SerializeField] private GameObject _waitingRoomPanel;
+    [SerializeField] private UnityEngine.UI.Toggle _roomPrivateToggle;
+    [SerializeField] private TMPro.TMP_Dropdown _roomDifficultyDropdown;
+    [SerializeField] private TMPro.TMP_Text _waitingRoomName;
+    [SerializeField] private TMPro.TMP_Text _waitingPrivacy;
+    [SerializeField] private TMPro.TMP_Text _waitingDifficulty;
+    [SerializeField] private UnityEngine.UI.Button _waitingChooseButton;
+    [SerializeField] private UnityEngine.UI.Button _leaveRoomButton;
+    [SerializeField] private UnityEngine.UI.Image _waitingPortrait;
+    [SerializeField] private GameObject _waitingPlaceholder;
+    [SerializeField] private TMPro.TMP_Text _waitingCharacterName;
+    [SerializeField] private TMPro.TMP_Text _waitingChooseLabel;
+    [SerializeField] private Sprite _waitingMousePortrait;
+    private int _waitingSelectedCharacter = -1;
+    private int _pendingWaitingCharacter = -1;
+    private bool _selectingForWaitingRoom;
     private void Start()
     {
         Cursor.lockState = CursorLockMode.None;
@@ -62,10 +79,51 @@ public class menuScript : MonoBehaviour
     }
     private void SubmitCreateRoomUI()
     {
-        if (_createRoomStatus == null) return;
-        _createRoomStatus.text = _roomNameInput == null || string.IsNullOrWhiteSpace(_roomNameInput.text)
-            ? "Vui lòng nhập tên phòng."
-            : "Chức năng tạo phòng chưa được kết nối.";
+        if (_roomNameInput == null || string.IsNullOrWhiteSpace(_roomNameInput.text))
+        {
+            if (_createRoomStatus != null) _createRoomStatus.text = "Vui lòng nhập tên phòng.";
+            return;
+        }
+        if (_waitingRoomPanel == null) return;
+        if (_waitingRoomName != null) _waitingRoomName.text = _roomNameInput.text.Trim();
+        if (_waitingPrivacy != null) _waitingPrivacy.text = _roomPrivateToggle != null && _roomPrivateToggle.isOn ? "Riêng tư" : "Công khai";
+        if (_waitingDifficulty != null && _roomDifficultyDropdown != null)
+            _waitingDifficulty.text = _roomDifficultyDropdown.options[_roomDifficultyDropdown.value].text;
+        _waitingSelectedCharacter = -1;
+        CloseCreateRoomUI();
+        ShowWaitingRoomUI();
+    }
+    private void ShowWaitingRoomUI()
+    {
+        if (_waitingRoomPanel == null) return;
+        ShowMainMenu();
+        if (_mainMenuPanel != null) _mainMenuPanel.SetActive(false);
+        _waitingRoomPanel.SetActive(true);
+        bool hasCharacter = _waitingSelectedCharacter == 0;
+        if (_waitingPortrait != null)
+        {
+            _waitingPortrait.sprite = hasCharacter ? _waitingMousePortrait : null;
+            _waitingPortrait.gameObject.SetActive(hasCharacter);
+        }
+        if (_waitingPlaceholder != null) _waitingPlaceholder.SetActive(!hasCharacter);
+        if (_waitingCharacterName != null) _waitingCharacterName.text = hasCharacter ? "Y tá Chuột" : "Chưa chọn nhân vật";
+        if (_waitingChooseLabel != null) _waitingChooseLabel.text = hasCharacter ? "Đổi nhân vật" : "Chọn nhân vật";
+    }
+    private void ShowWaitingCharacterSelection()
+    {
+        ShowCharacterSelection();
+        _pendingWaitingCharacter = _waitingSelectedCharacter;
+        _selectingForWaitingRoom = true;
+        RefreshCharacterPreview();
+    }
+    private void ReturnFromCharacterSelection()
+    {
+        if (_selectingForWaitingRoom)
+        {
+            _pendingWaitingCharacter = _waitingSelectedCharacter;
+            ShowWaitingRoomUI();
+        }
+        else ShowMainMenu();
     }
     public void ShowJoinLobbyUI(){ ShowMenuNotice("Join Lobby", "Chức năng tham gia Lobby chưa được kết nối."); }
     public void ShowSettingsUI(){ ShowMenuNotice("Cài đặt", "Màn hình cài đặt chưa được kết nối."); }
@@ -107,6 +165,16 @@ public class menuScript : MonoBehaviour
     [SerializeField] private UnityEngine.UI.Button _soloButton;
     [SerializeField] private UnityEngine.UI.Button _backButton;
     [SerializeField] private UnityEngine.UI.Button _startButton;
+    [SerializeField] private string _soloScenePath;
+    private bool _soloLoading;
+    public static string SoloCharacterId { get; private set; } = "";
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetSoloCharacterId()
+    {
+        SoloCharacterId = "";
+    }
+    [SerializeField] private TMPro.TMP_Text _selectionFooterLabel;
+    private Color _soloFooterLabelColor;
     [SerializeField] private UnityEngine.UI.Button _chooseButton;
     [SerializeField] private TMPro.TMP_Text _detailsText;
     [SerializeField] private UnityEngine.UI.ScrollRect _detailsScroll;
@@ -129,13 +197,17 @@ public class menuScript : MonoBehaviour
         }
         _backAction = new UnityEngine.InputSystem.InputAction("MenuBack", UnityEngine.InputSystem.InputActionType.Button, "<Keyboard>/escape");
         _backAction.performed += OnBackPerformed;
+        if (_selectionFooterLabel != null) _soloFooterLabelColor = _selectionFooterLabel.color;
         if (_startButton != null) _startButton.interactable = false;
     }
     private void OnEnable()
     {
         if (_soloButton != null) _soloButton.onClick.AddListener(ShowCharacterSelection);
-        if (_backButton != null) _backButton.onClick.AddListener(ShowMainMenu);
+        if (_backButton != null) _backButton.onClick.AddListener(ReturnFromCharacterSelection);
+        if (_waitingChooseButton != null) _waitingChooseButton.onClick.AddListener(ShowWaitingCharacterSelection);
+        if (_leaveRoomButton != null) _leaveRoomButton.onClick.AddListener(ShowLobbyUI);
         if (_chooseButton != null) _chooseButton.onClick.AddListener(ChooseMouse);
+        if (_startButton != null) _startButton.onClick.AddListener(OnSelectionFooterClicked);
         if (_multiplayerButton != null) _multiplayerButton.onClick.AddListener(ShowLobbyUI);
         if (_lobbyBackButton != null) _lobbyBackButton.onClick.AddListener(ShowMainMenu);
         if (_cancelCreateButton != null) _cancelCreateButton.onClick.AddListener(CloseCreateRoomUI);
@@ -152,8 +224,11 @@ public class menuScript : MonoBehaviour
     private void OnDisable()
     {
         if (_soloButton != null) _soloButton.onClick.RemoveListener(ShowCharacterSelection);
-        if (_backButton != null) _backButton.onClick.RemoveListener(ShowMainMenu);
+        if (_backButton != null) _backButton.onClick.RemoveListener(ReturnFromCharacterSelection);
+        if (_waitingChooseButton != null) _waitingChooseButton.onClick.RemoveListener(ShowWaitingCharacterSelection);
+        if (_leaveRoomButton != null) _leaveRoomButton.onClick.RemoveListener(ShowLobbyUI);
         if (_chooseButton != null) _chooseButton.onClick.RemoveListener(ChooseMouse);
+        if (_startButton != null) _startButton.onClick.RemoveListener(OnSelectionFooterClicked);
         if (_multiplayerButton != null) _multiplayerButton.onClick.RemoveListener(ShowLobbyUI);
         if (_lobbyBackButton != null) _lobbyBackButton.onClick.RemoveListener(ShowMainMenu);
         if (_cancelCreateButton != null) _cancelCreateButton.onClick.RemoveListener(CloseCreateRoomUI);
@@ -174,12 +249,23 @@ public class menuScript : MonoBehaviour
             CloseCreateRoomUI();
             return;
         }
-        if ((_characterPanel != null && _characterPanel.activeSelf) ||
-            (_lobbyPanel != null && _lobbyPanel.activeSelf)) ShowMainMenu();
+        if (_characterPanel != null && _characterPanel.activeSelf)
+        {
+            ReturnFromCharacterSelection();
+            return;
+        }
+        if (_waitingRoomPanel != null && _waitingRoomPanel.activeSelf)
+        {
+            ShowLobbyUI();
+            return;
+        }
+        if (_lobbyPanel != null && _lobbyPanel.activeSelf) ShowMainMenu();
     }
     public void ShowCharacterSelection()
     {
         if (_characterPanel == null) return;
+        _selectingForWaitingRoom = false;
+        if (_waitingRoomPanel != null) _waitingRoomPanel.SetActive(false);
         if (_mainMenuPanel != null) _mainMenuPanel.SetActive(false);
         if (_gameModePanel != null) _gameModePanel.SetActive(false);
         if (_lobbyPanel != null) _lobbyPanel.SetActive(false);
@@ -197,21 +283,82 @@ _characterPanel.SetActive(true);
     private void ChooseMouse()
     {
         if (_characterCards.Length == 0 || !_characterCards[0].unlocked) return;
+        if (_selectingForWaitingRoom)
+        {
+            _pendingWaitingCharacter = 0;
+            RefreshCharacterPreview();
+            return;
+        }
         _selectedCharacter = 0;
         RefreshCharacterPreview();
+    }
+    private void ConfirmWaitingCharacter()
+    {
+        if (!_selectingForWaitingRoom || _characterPanel == null || !_characterPanel.activeSelf) return;
+        if (_pendingWaitingCharacter < 0 || _pendingWaitingCharacter >= _characterCards.Length ||
+            !_characterCards[_pendingWaitingCharacter].unlocked) return;
+        _waitingSelectedCharacter = _pendingWaitingCharacter;
+        ShowWaitingRoomUI();
+    }
+    private void OnSelectionFooterClicked()
+    {
+        if (_selectingForWaitingRoom) ConfirmWaitingCharacter();
+        else StartSoloGame();
+    }
+    private void StartSoloGame()
+    {
+        if (_soloLoading || _selectingForWaitingRoom || _characterPanel == null || !_characterPanel.activeSelf) return;
+        if (_selectedCharacter < 0 || _selectedCharacter >= _characterCards.Length ||
+            !_characterCards[_selectedCharacter].unlocked) return;
+        if (string.IsNullOrEmpty(_soloScenePath) || !Application.CanStreamedLevelBeLoaded(_soloScenePath))
+        {
+            Debug.LogError("Hospital Day 1 is not enabled in the build scene list: " + _soloScenePath, this);
+            return;
+        }
+        string previousCharacterId = SoloCharacterId;
+        _soloLoading = true;
+        SoloCharacterId = _characterCards[_selectedCharacter].characterId;
+        UpdateSelectionFooter();
+        try
+        {
+            AsyncOperation operation = SceneManager.LoadSceneAsync(_soloScenePath, LoadSceneMode.Single);
+            if (operation == null) throw new System.InvalidOperationException("Hospital Day 1 scene load could not be started.");
+        }
+        catch (System.Exception exception)
+        {
+            _soloLoading = false;
+            SoloCharacterId = previousCharacterId;
+            UpdateSelectionFooter();
+            Debug.LogException(exception, this);
+        }
+    }
+    private void UpdateSelectionFooter()
+    {
+        bool canConfirm = _selectingForWaitingRoom && _pendingWaitingCharacter >= 0 &&
+            _pendingWaitingCharacter < _characterCards.Length && _characterCards[_pendingWaitingCharacter].unlocked;
+        bool canStartSolo = !_selectingForWaitingRoom && !_soloLoading && _selectedCharacter >= 0 &&
+            _selectedCharacter < _characterCards.Length && _characterCards[_selectedCharacter].unlocked;
+        if (_startButton != null) _startButton.interactable = canConfirm || canStartSolo;
+        if (_selectionFooterLabel != null)
+        {
+            _selectionFooterLabel.text = _selectingForWaitingRoom ? "Xác nhận" : "Bắt đầu";
+            _selectionFooterLabel.color = canConfirm || canStartSolo ? Color.white : _soloFooterLabelColor;
+        }
     }
     private void RefreshCharacterPreview()
     {
         if (_characterCards.Length == 0) return;
+        UpdateSelectionFooter();
+        int selectedCharacter = _selectingForWaitingRoom ? _pendingWaitingCharacter : _selectedCharacter;
         for (int i = 0; i < _characterCards.Length; i++)
         {
             var card = _characterCards[i];
             if (card == null) continue;
             if (card.frame != null) card.frame.gameObject.SetActive(i == _viewedCharacter);
-            if (card.selectedBadge != null) card.selectedBadge.SetActive(i == _selectedCharacter);
+            if (card.selectedBadge != null) card.selectedBadge.SetActive(i == selectedCharacter);
             if (card.viewedBadge != null) card.viewedBadge.SetActive(false);
         }
-        if (_chooseButton != null) _chooseButton.gameObject.SetActive(_selectedCharacter != 0);
+        if (_chooseButton != null) _chooseButton.gameObject.SetActive(selectedCharacter != 0);
         var viewed = _characterCards[_viewedCharacter];
         if (_detailsText != null)
             _detailsText.text = "<b>" + viewed.displayName + " — " + viewed.tier + "</b>\n" + viewed.bonuses + "\n" + viewed.passive + "\nMở khóa: " + viewed.unlockRequirement;
@@ -232,6 +379,8 @@ _characterPanel.SetActive(true);
     }
     public void ShowMainMenu()
     {
+        _selectingForWaitingRoom = false;
+        if (_waitingRoomPanel != null) _waitingRoomPanel.SetActive(false);
         if (_lobbyCanvasGroup != null)
         {
             _lobbyCanvasGroup.interactable = true;
