@@ -42,7 +42,11 @@ public class AAH_EquippedItemView : MonoBehaviour
     {
         var item = _inventory != null ? _inventory.SelectedItem : null;
         if (item == _shownItem && (_instance != null || item == null || item.EquippedModel == null)) return;
-        if (_instance != null) Destroy(_instance);
+        if (_instance != null)
+        {
+            _instance.SetActive(false);
+            Destroy(_instance);
+        }
         _instance = null; _shownItem = item;
         if (item == null || item.EquippedModel == null || _anchor == null) return;
 
@@ -50,6 +54,9 @@ public class AAH_EquippedItemView : MonoBehaviour
         _instance.name = "Equipped_" + item.ItemId;
         _instance.transform.localRotation = item.EquippedRotation;
         foreach (var c in _instance.GetComponentsInChildren<Collider>(true)) c.enabled = false;
+        // A collected shelf bottle is inactive. Its equipped copy must be visible on reselection.
+        foreach (var body in _instance.GetComponentsInChildren<Rigidbody>(true)) body.isKinematic = true;
+        _instance.SetActive(true);
         var renderers = _instance.GetComponentsInChildren<Renderer>(true);
         if (renderers.Length == 0) return;
         foreach (var r in renderers) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;

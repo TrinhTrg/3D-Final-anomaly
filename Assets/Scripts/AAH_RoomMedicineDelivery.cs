@@ -14,7 +14,8 @@ public partial class AAH_RoomTreatmentSequence
     [SerializeField] private MedicineStock[] _medicineStocks;
     [SerializeField] private RectTransform _guideArrow;
     [SerializeField] private TMPro.TMP_Text _guideText;
-    [SerializeField] private Transform _medicineHoldPoint;
+    [Tooltip("Local player's five-slot inventory. Resolved automatically in the hospital scene.")]
+    [SerializeField] private AAH_PlayerInventory _inventory;
     [SerializeField] private GameObject _treatmentPanel;
     [SerializeField] private UnityEngine.UI.Image _treatmentFill;
     [SerializeField] private TMPro.TMP_Text _treatmentStatus;
@@ -45,7 +46,8 @@ public partial class AAH_RoomTreatmentSequence
         public bool collected;
         public bool delivered;
         public GameObject source;
-        public GameObject held;
+        public AAH_ItemDefinition item;
+        public int slot = -1;
     }
     private MedicineDisplayEntry ResolveMedicine(string medicine)
     {
@@ -64,8 +66,7 @@ public partial class AAH_RoomTreatmentSequence
     private void ResetPatientDelivery()
     {
         DisableDelivery();
-        foreach (var order in _orders) if (order.held != null) Destroy(order.held);
-        _orders.Clear();
+        ClearMedicineItems();
         CollectedMedicineCount = DeliveredMedicineCount = 0;
         TreatmentProgress = 0f;
         _focusedOrder = -1; _focusedBottle = null;
@@ -73,8 +74,26 @@ public partial class AAH_RoomTreatmentSequence
         if (_treatmentFill != null) _treatmentFill.fillAmount = 0f;
         if (_treatmentStatus != null) _treatmentStatus.text = "";
     }
+    private void ClearMedicineItems()
+    {
+        foreach (var order in _orders)
+        {
+            if (order.item == null) continue;
+            if (_inventory != null && _inventory.GetItem(order.slot) == order.item)
+                _inventory.RemoveAt(order.slot);
+            if (order.source != null) order.source.SetActive(true);
+            Destroy(order.item);
+        }
+        _orders.Clear();
+    }
     private void InitializeDelivery()
     {
+        if (_inventory == null && _player != null)
+            _inventory = _player.GetComponentInParent<AAH_PlayerInventory>();
+        if (_inventory == null && _playerCamera != null)
+            _inventory = _playerCamera.GetComponentInParent<AAH_PlayerInventory>();
+        if (_inventory == null)
+            _inventory = FindFirstObjectByType<AAH_PlayerInventory>();
         if (_guideArrow != null) _guideArrow.gameObject.SetActive(false);
         if (_guideText != null) _guideText.text = "";
         if (_treatmentPanel != null) _treatmentPanel.SetActive(false);
@@ -106,7 +125,7 @@ public partial class AAH_RoomTreatmentSequence
     }
     private void BeginMedicineDelivery()
     {
-        _orders.Clear(); CollectedMedicineCount = 0; DeliveredMedicineCount = 0;
+        ClearMedicineItems(); CollectedMedicineCount = 0; DeliveredMedicineCount = 0;
         if (_medicines != null)
             foreach (var medicine in _medicines)
             {
@@ -130,12 +149,11 @@ public partial class AAH_RoomTreatmentSequence
     {
         _focusedOrder = -1; _focusedBottle = null;
         if (!OwnsDelivery()) return false;
-        if (_playerCamera == null || _patient == null || _patient.State != AAH_PatientActor.PatientState.AtBed || Time.timeScale <= 0f || (_checkIn != null && _checkIn.Busy)) return false;
+        if (_playerCamera == null || _patient == null || _patient.State != AAH_PatientActor.PatientState.AtBed || Time.timeScale <= 0f || (_checkIn != null && _checkIn.BlocksWorldInteraction)) return false;
         RaycastHit hit;
         if (!Physics.Raycast(_playerCamera.transform.position, _playerCamera.transform.forward, out hit, _rayDistance, ~0, QueryTriggerInteraction.Collide)) return false;
         var position = _player != null ? _player.position : _playerCamera.transform.position;
-        var nearest = hit.collider.ClosestPoint(position); nearest.y = position.y;
-        if (Vector3.Distance(position, nearest) > _interactionDistance) return false;
+        if (!WithinInteractionDistance(hit, position)) return false;
         if (hit.collider == _patientCollider) return CollectedMedicineCount > DeliveredMedicineCount;
         for (int i = 0; i < _orders.Count; i++)
         {
@@ -153,34 +171,49 @@ public partial class AAH_RoomTreatmentSequence
         if (_focusedOrder >= 0)
         {
             var order = _orders[_focusedOrder];
-            order.source = _focusedBottle;
-            if (_medicineHoldPoint != null)
+            if (_inventory == null || !_inventory.HasFreeSlot) return;
+            var item = AAH_ItemDefinition.CreateMedicine(order.label, order.stock.image, _focusedBottle);
+            if (!_inventory.TryAdd(item, out int slot))
             {
-                var held = Instantiate(_focusedBottle, _medicineHoldPoint);
-                held.name = "HeldMedicine_" + order.label;
-                foreach (var collider in held.GetComponentsInChildren<Collider>(true)) collider.enabled = false;
-                var renderers = held.GetComponentsInChildren<Renderer>();
-                var bounds = renderers[0].bounds;
-                foreach (var renderer in renderers) bounds.Encapsulate(renderer.bounds);
-                held.transform.localScale *= 0.45f / Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
-                bounds = renderers[0].bounds; foreach (var renderer in renderers) bounds.Encapsulate(renderer.bounds);
-                held.transform.position += _medicineHoldPoint.position - bounds.center;
-                held.transform.localPosition += Vector3.right * CollectedMedicineCount * 0.22f;
-                order.held = held;
+                Destroy(item);
+                return;
             }
-            order.source.SetActive(false); order.collected = true; CollectedMedicineCount++;
+
+            order.item = item;
+            order.slot = slot;
+            order.source = _focusedBottle;
+            order.source.SetActive(false);
+            order.collected = true;
+            CollectedMedicineCount++;
+            _inventory.Select(slot);
+            return;
         }
-        else
-        {
-            foreach (var order in _orders)
-                if (order.collected && !order.delivered)
-                {
-                    order.delivered = true; DeliveredMedicineCount++;
-                    if (order.held != null) Destroy(order.held);
-                    break;
-                }
-            if (DeliveredMedicineCount == _orders.Count) StartRecovery();
-        }
+
+        var selected = SelectedMedicineOrder();
+        if (selected == null) return;
+        _inventory.RemoveAt(selected.slot);
+        Destroy(selected.item);
+        selected.item = null;
+        selected.delivered = true;
+        DeliveredMedicineCount++;
+        if (DeliveredMedicineCount == _orders.Count) StartRecovery();
+    }
+    private MedicineOrder SelectedMedicineOrder()
+    {
+        if (_inventory == null || _inventory.SelectedItem == null) return null;
+        foreach (var order in _orders)
+            if (!order.delivered && order.slot == _inventory.SelectedIndex && order.item == _inventory.SelectedItem)
+                return order;
+        return null;
+    }
+    private string MedicinePrompt()
+    {
+        if (!IsFocused) return "";
+        if (_inventory == null) return "Chưa kết nối túi đồ của người chơi";
+        if (_focusedOrder >= 0)
+            return _inventory.HasFreeSlot ? "[E] Lấy " + _orders[_focusedOrder].label : "Túi đồ đã đầy (5/5)";
+        var selected = SelectedMedicineOrder();
+        return selected != null ? "[E] Đặt " + selected.label : "Chọn ô thuốc của bệnh nhân này";
     }
     private void UpdateDelivery()
     {
@@ -213,7 +246,7 @@ public partial class AAH_RoomTreatmentSequence
             _guideArrow.localRotation = Quaternion.Euler(0f, 0f, -angle);
         }
         if (_guideText != null) _guideText.text = instruction + "\nĐã lấy: " + CollectedMedicineCount + "/" + _orders.Count + " | Đã đặt: " + DeliveredMedicineCount + "/" + _orders.Count;
-        if (_prompt != null) _prompt.text = IsFocused ? (_focusedOrder >= 0 ? "[E] Lấy " + _orders[_focusedOrder].label : "[E] Đặt thuốc / Chữa bệnh") : "";
+        if (_prompt != null) _prompt.text = MedicinePrompt();
         SetOutline(_patientOutline, IsFocused && _focusedOrder < 0 && CollectedMedicineCount > DeliveredMedicineCount);
     }
     private void StartRecovery()

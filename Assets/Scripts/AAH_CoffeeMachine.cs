@@ -38,7 +38,7 @@ public class AAH_CoffeeMachine : MonoBehaviour
     private void HandleHoldCanceled(UnityEngine.InputSystem.InputAction.CallbackContext context) { _holdElapsed = 0f; }
     private bool CanFocus()
     {
-        if (_playerCamera == null || _machineCollider == null || Time.timeScale <= 0f || (_checkIn != null && _checkIn.Busy)) return false;
+        if (_playerCamera == null || _machineCollider == null || Time.timeScale <= 0f || (_checkIn != null && _checkIn.BlocksWorldInteraction)) return false;
         RaycastHit hit;
         return Physics.Raycast(_playerCamera.transform.position, _playerCamera.transform.forward, out hit, _interactionDistance, ~0, QueryTriggerInteraction.Ignore)
             && hit.collider == _machineCollider;

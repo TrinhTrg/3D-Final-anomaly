@@ -14,7 +14,11 @@ public class AAH_PatientArrivalController : MonoBehaviour
     [SerializeField] private AAH_PatientDoorAccess[] _doors;
     [SerializeField, Min(0f)] private float _arrivalDelay = 4f;
     [SerializeField, Min(0.1f)] private float _walkingSpeed = 9f;
+    [Tooltip("Hệ số tốc độ đi của bệnh nhân, áp dụng khi bệnh nhân xuất hiện.")]
+    [SerializeField, Min(0.1f)] private float _patientSpeedMultiplier = 1.5f;
     [SerializeField] private int _agentTypeId;
+    public Transform StandPoint => _stand;
+    public float WalkingSpeed => _walkingSpeed;
     private int _nextPatient;
     private void Start()
     {
@@ -39,7 +43,9 @@ public class AAH_PatientArrivalController : MonoBehaviour
             go.SetActive(false);
             var agent = go.AddComponent<UnityEngine.AI.NavMeshAgent>();
             agent.agentTypeID = _agentTypeId;
-            agent.radius = 1f; agent.height = 5.4f; agent.speed = _walkingSpeed; agent.acceleration = 12f;
+            agent.radius = 1f; agent.height = 5.4f;
+            agent.speed = _walkingSpeed * _patientSpeedMultiplier;
+            agent.acceleration = 12f * _patientSpeedMultiplier;
             agent.angularSpeed = 180f; agent.stoppingDistance = 0.15f; agent.baseOffset = 0f;
             var actor = go.AddComponent<AAH_PatientActor>();
             actor.Initialize(profile, "PAT-" + (_nextPatient + 1).ToString("D3"), _rooms, _doors);

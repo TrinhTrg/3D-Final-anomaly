@@ -126,7 +126,7 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
     {
         if (Stage == TreatmentStage.CollectingMedicine) return SelectDeliveryTarget();
         if (_playerCamera == null || _patient == null || _patient.State != AAH_PatientActor.PatientState.AtBed || Time.timeScale <= 0f
-            || (_checkIn != null && _checkIn.Busy) || Stage < TreatmentStage.Patient || Stage > TreatmentStage.Computer) return false;
+            || (_checkIn != null && _checkIn.BlocksWorldInteraction) || Stage < TreatmentStage.Patient || Stage > TreatmentStage.Computer) return false;
         RaycastHit hit;
         if (!Physics.Raycast(_playerCamera.transform.position, _playerCamera.transform.forward, out hit, _rayDistance, ~0, QueryTriggerInteraction.Collide)) return false;
         bool matches = Stage == TreatmentStage.Patient ? hit.collider == _patientCollider
@@ -134,7 +134,15 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
             : hit.collider == _computerScreenCollider || (_computer != null && (hit.collider.transform == _computer.transform || hit.collider.transform.IsChildOf(_computer.transform)));
         if (!matches) return false;
         var position = _player != null ? _player.position : _playerCamera.transform.position;
-        var nearest = hit.collider.ClosestPoint(position); nearest.y = position.y;
+        return WithinInteractionDistance(hit, position);
+    }
+    private bool WithinInteractionDistance(RaycastHit hit, Vector3 position)
+    {
+        Collider collider = hit.collider;
+        bool supportsClosestPoint = collider is BoxCollider || collider is SphereCollider ||
+            collider is CapsuleCollider || (collider is MeshCollider mesh && mesh.convex);
+        var nearest = supportsClosestPoint ? collider.ClosestPoint(position) : hit.point;
+        nearest.y = position.y;
         return Vector3.Distance(position, nearest) <= _interactionDistance;
     }
     private void HandleInteract(UnityEngine.InputSystem.InputAction.CallbackContext context)
@@ -299,6 +307,7 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
     }
     private void OnDestroy()
     {
+        ClearMedicineItems();
         if (_interact != null) { _interact.performed -= HandleInteract; _interact.Dispose(); }
         foreach (var list in new[] { _patientOutline, _scanOutline, _computerOutline }) foreach (var go in list) if (go != null) Destroy(go);
     }

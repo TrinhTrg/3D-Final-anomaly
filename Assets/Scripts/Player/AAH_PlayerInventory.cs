@@ -90,13 +90,17 @@ public class AAH_PlayerInventory : MonoBehaviour
     }
 
     /// <summary>Adds to the first empty slot. Returns false when full.</summary>
-    public bool TryAdd(AAH_ItemDefinition item)
+    public bool TryAdd(AAH_ItemDefinition item) => TryAdd(item, out _);
+
+    public bool TryAdd(AAH_ItemDefinition item, out int slot)
     {
+        slot = -1;
         if (item == null) return false;
         for (int i = 0; i < SlotCount; i++)
         {
             if (_slots[i] != null) continue;
             _slots[i] = item;
+            slot = i;
             InventoryChanged?.Invoke();
             return true;
         }

@@ -8,7 +8,7 @@ using TMPro;
 /// Quản lý toàn bộ quy trình Check-in bệnh nhân tại Quầy Lễ Tân:
 /// 1. Chuông gọi bệnh nhân (Bell) -> NPC tiến vào bấm chuông thoại "I'm Mai Yamada, I'm here for my appointment..."
 /// 2. Bảng kẹp giấy (Clipboard): Mở UI giấy tờ, ký xác nhận.
-/// 3. Máy ảnh trên chân máy (Camera): Flash, chụp ảnh bệnh nhân, ảnh Polaroid hiện dần trong 3s rồi cố định trên HUD.
+/// 3. Máy ảnh trên chân máy (Camera): Flash, chụp ảnh bệnh nhân, ảnh Polaroid hiện dần trong 3s trong thời gian hiển thị 15 giây.
 /// 4. Máy tính (Computer): Tiến trình "REGISTERING..." chạy thanh progress bar.
 /// 5. Máy in (Printer): Nhấn E in ra thẻ/giấy chỉ định phòng (tổng 6 phòng).
 /// 6. Hoàn tất: Bắn sự kiện OnPatientCheckedIn -> Bệnh nhân chuyển sang Leaving.
@@ -59,7 +59,7 @@ public class AAH_CheckInSequence : MonoBehaviour
 
     [Header("UI - Step 2: Camera & Polaroid")]
     public GameObject panelFlash;          // Trắng loá màn hình
-    public GameObject cardPolaroidHUD;     // Thẻ ảnh Polaroid cố định trên HUD
+    public GameObject cardPolaroidHUD;     // Thẻ ảnh Polaroid trên HUD
     public Image imgPolaroidPhoto;        // Ảnh bên trong Polaroid
     public TextMeshProUGUI txtPolaroidName;
     public Camera photoCaptureCamera;     // Camera chụp ảnh bệnh nhân (RenderTexture)
@@ -101,6 +101,8 @@ public class AAH_CheckInSequence : MonoBehaviour
     private bool _busy, _modal, _sentCompletion, _savedCanMove;
     private CursorLockMode _savedCursor;
     private bool _savedVisible;
+    private const double PhotoDisplaySeconds = 15.0;
+    private double _photoExpiresAt;
     private Texture2D _photoTexture;
     private Sprite _photoSprite;
     private Coroutine _operation;
@@ -109,6 +111,10 @@ public class AAH_CheckInSequence : MonoBehaviour
     [SerializeField] private AAH_Day1Dialogue _day1Dialogue;
     private bool _storyDialogue;
     public bool Busy => _busy || _modal || _storyDialogue;
+    // The automatic bell, arrival speech and clipboard handover only occupy the desk.
+    public bool BlocksWorldInteraction => _modal || _storyDialogue ||
+        (_busy && currentStep != CheckInStep.PatientApproaching && currentStep != CheckInStep.PatientDialogue);
+
     public IEnumerator ShowStoryDialogue(string speaker, AAH_Day1Dialogue data, AAH_Day1Dialogue.Line[] lines)
     {
         while (Busy || (panelDialogue != null && panelDialogue.activeSelf)) yield return null;
@@ -155,6 +161,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     void Awake()
     {
         Instance = this;
+        if (cardPolaroidHUD != null) cardPolaroidHUD.SetActive(false);
         if (stepClipboard != null) _clipboardDeskPosition = stepClipboard.transform.position;
     }
     void OnEnable()
@@ -202,6 +209,8 @@ public class AAH_CheckInSequence : MonoBehaviour
     }
     private void Update()
     {
+        if (_photoSprite != null && Time.unscaledTimeAsDouble >= _photoExpiresAt)
+            HidePhoto();
         if (txtQueueSummary != null && roomRegistry != null)
             txtQueueSummary.text = roomRegistry.FreeCount == 0 && _patient == null ? "Đang chờ phòng trống (6/6)" : "Tiếp nhận: " + (_patient != null ? patientName : "Chờ bệnh nhân") + " | Phòng trống: " + roomRegistry.FreeCount + "/6";
         if (_patient != null && _sentCompletion && _patient.IsAwayFrom(patientStandPoint.position)) ClearDesk();
@@ -288,8 +297,11 @@ public class AAH_CheckInSequence : MonoBehaviour
         try { CaptureSnapshot(); captured = true; }
         catch (Exception e) { Debug.LogError("Patient photo failed: " + e.Message, this); }
         if (!captured) { _busy = false; SetStep(currentStep); _operation = null; yield break; }
+        txtPolaroidName.text = patientName;
+        imgPolaroidPhoto.color = Color.black;
+        _photoExpiresAt = Time.unscaledTimeAsDouble + PhotoDisplaySeconds;
+        cardPolaroidHUD.SetActive(true);
         if (panelFlash != null) { panelFlash.SetActive(true); yield return new WaitForSeconds(0.12f); panelFlash.SetActive(false); }
-        cardPolaroidHUD.SetActive(true); txtPolaroidName.text = patientName; imgPolaroidPhoto.color = Color.black;
         float elapsed = 0f;
         while (elapsed < photoDevelopDuration) { elapsed += Time.deltaTime; imgPolaroidPhoto.color = Color.Lerp(Color.black, Color.white, elapsed / photoDevelopDuration); yield return null; }
         imgPolaroidPhoto.color = Color.white; stepCameraTripod.MarkCompleted(); _busy = false;
@@ -307,17 +319,25 @@ public class AAH_CheckInSequence : MonoBehaviour
         var oldTarget = photoCaptureCamera.targetTexture; var oldActive = RenderTexture.active;
         var rt = RenderTexture.GetTemporary(512, 512, 24);
         Texture2D texture = null;
+        Sprite sprite;
         try
         {
             photoCaptureCamera.targetTexture = rt; photoCaptureCamera.Render(); RenderTexture.active = rt;
             texture = new Texture2D(512, 512, TextureFormat.RGB24, false);
             texture.ReadPixels(new Rect(0, 0, 512, 512), 0, 0); texture.Apply();
+            sprite = Sprite.Create(texture, new Rect(0, 0, 512, 512), new Vector2(0.5f, 0.5f));
         }
         catch { if (texture != null) Destroy(texture); throw; }
         finally { photoCaptureCamera.targetTexture = oldTarget; RenderTexture.active = oldActive; RenderTexture.ReleaseTemporary(rt); }
         ReleasePhoto(); _photoTexture = texture;
-        _photoSprite = Sprite.Create(texture, new Rect(0, 0, 512, 512), new Vector2(0.5f, 0.5f));
+        _photoSprite = sprite;
         imgPolaroidPhoto.sprite = _photoSprite;
+    }
+    private void HidePhoto()
+    {
+        if (cardPolaroidHUD != null) cardPolaroidHUD.SetActive(false);
+        if (imgPolaroidPhoto != null) imgPolaroidPhoto.sprite = null;
+        ReleasePhoto();
     }
     private void ReleasePhoto()
     {
@@ -384,6 +404,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     private void PlaySound(AudioClip clip) { if (clip != null && audioSource != null) audioSource.PlayOneShot(clip); }
     void OnDisable()
     {
+        HidePhoto();
         StopAllCoroutines(); _operation = null; _busy = false; RestoreModal(); HidePanels();
         if (stepClipboard != null) stepClipboard.OnInteracted -= HandleClipboardInteracted;
         if (stepCameraTripod != null) stepCameraTripod.OnInteracted -= HandleCameraInteracted;

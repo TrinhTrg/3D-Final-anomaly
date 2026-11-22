@@ -45,6 +45,9 @@ public class AAH_GameManager : MonoBehaviour
     [SerializeField] private AAH_RoomTreatmentSequence[] _reportTreatmentRooms;
     private readonly HashSet<string> _treatedPatientIds = new HashSet<string>();
     private readonly HashSet<string> _acceptedPatientIds = new HashSet<string>();
+    private readonly HashSet<string> _treatedAnomalyIds = new HashSet<string>();
+    private bool _boardChecked;
+    private bool _numberOnlyBoard;
     public int PatientsTreated => _treatedPatientIds.Count;
     public int PatientsAccepted => _acceptedPatientIds.Count;
     private readonly HashSet<string> _visitorIds = new HashSet<string>();
@@ -55,17 +58,29 @@ public class AAH_GameManager : MonoBehaviour
     [SerializeField, Min(0)] private int _coinsPerBlockedAnomaly = 15;
     [SerializeField, Min(0)] private int _coinsPerCompletedShift = 20;
     [SerializeField, Min(0)] private int _coinsForZeroDeaths = 10;
+    // A fresh Day 1 displays the rewards from this playthrough. The wallet
+    // separately keeps the permanent balance and prevents duplicate payouts.
+    private readonly HashSet<string> _day1Outcomes = new HashSet<string>();
+    public int Day1Coins { get; private set; }
+    public event System.Action<int> Day1CoinsChanged;
     private IAAH_CoinWallet _coinWallet;
     private string _coinShiftId;
     public int TotalAnimalCoins => _coinWallet != null ? _coinWallet.Balance : 0;
     public int TotalVisitors => _visitorIds.Count;
     public int BlockedAnomalies => _rejectedAnomalyIds.Count;
     public int PatientDeaths => Mathf.Max(_deadPatientIds.Count, _coinWallet != null ? _coinWallet.GetShiftDeaths(_coinShiftId) : 0);
-    public int EarnedAnimalCoins => _coinWallet != null ? _coinWallet.GetShiftEarnings(_coinShiftId) : 0;
+    public int EarnedAnimalCoins => currentDay == 1 ? Day1Coins :
+        (_coinWallet != null ? _coinWallet.GetShiftEarnings(_coinShiftId) : 0);
     private void AwardCoins(string outcomeId, int amount)
     {
         if (_coinWallet != null && !string.IsNullOrEmpty(_coinShiftId))
             _coinWallet.TryAward(_coinShiftId + ":" + outcomeId, _coinShiftId, amount);
+
+        if (currentDay == 1 && amount > 0 && _day1Outcomes.Add(outcomeId))
+        {
+            Day1Coins += amount;
+            Day1CoinsChanged?.Invoke(Day1Coins);
+        }
     }
     private void AwardShiftCompletion()
     {
@@ -101,7 +116,11 @@ public class AAH_GameManager : MonoBehaviour
         if (shiftEnded || string.IsNullOrWhiteSpace(patientId)) return;
         _visitorIds.Add(patientId);
         _deadPatientIds.Add(patientId);
-        _treatedPatientIds.Remove(patientId);
+        if (_treatedPatientIds.Remove(patientId))
+        {
+            _treatedAnomalyIds.Remove(patientId);
+            UpdateClientList();
+        }
         if (_coinWallet != null) _coinWallet.RecordShiftDeath(_coinShiftId, patientId);
     }
     private void OnEnable()
@@ -128,7 +147,11 @@ public class AAH_GameManager : MonoBehaviour
     private void CountTreatment(AAH_PatientActor patient)
     {
         if (shiftEnded || patient == null || _deadPatientIds.Contains(patient.PatientId)) return;
-        _treatedPatientIds.Add(patient.PatientId);
+        if (_treatedPatientIds.Add(patient.PatientId))
+        {
+            if (patient.IsAnomaly) _treatedAnomalyIds.Add(patient.PatientId);
+            UpdateClientList();
+        }
         RecordVisitor(patient.PatientId);
         AwardCoins("patient-treated:" + patient.PatientId, _coinsPerTreatment);
     }
@@ -144,6 +167,12 @@ public class AAH_GameManager : MonoBehaviour
         _day1Objective = "Ngày 1 hoàn tất.";
         UpdateUI();
         ShowShiftEndPanel();
+        if (panelShiftEnd != null)
+        {
+            var report = panelShiftEnd.GetComponent<AAH_ShiftEndUI>();
+            if (report == null) report = panelShiftEnd.AddComponent<AAH_ShiftEndUI>();
+            report.PrepareDay1Report();
+        }
     }
 
     void Awake()
@@ -154,6 +183,7 @@ public class AAH_GameManager : MonoBehaviour
             return;
         }
         Instance = this;
+        if (gameObject.scene.name == AAH_ShiftEndUI.Day2Scene) currentDay = 2;
         try
         {
             _coinWallet = AAH_CoinWallet.Current;
@@ -231,10 +261,57 @@ public class AAH_GameManager : MonoBehaviour
         }
     }
 
+    private static bool HasBoardHeadings(TMP_Text label)
+    {
+        string value = label.text ?? string.Empty;
+        return value.IndexOf("CHECK IN PATIENTS", System.StringComparison.OrdinalIgnoreCase) >= 0
+            && value.IndexOf("NORMAL ANIMALS", System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private void ResolveClientListText()
+    {
+        if (_clientListText != null && _clientListText.gameObject.scene == gameObject.scene
+            && _clientListText.isActiveAndEnabled
+            && (HasBoardHeadings(_clientListText) || int.TryParse(_clientListText.text, out _))) return;
+
+        TMP_Text match = null;
+        foreach (var label in FindObjectsByType<TMP_Text>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        {
+            if (label.gameObject.scene != gameObject.scene || !label.isActiveAndEnabled || !HasBoardHeadings(label)) continue;
+            if (match != null)
+            {
+                Debug.LogWarning("Có nhiều bảng NORMAL ANIMALS. Hãy gán đúng Client List Text trên GameManager.", this);
+                return;
+            }
+            match = label;
+        }
+        if (match != null) _clientListText = match;
+        else if (_clientListText == null)
+            Debug.LogWarning("Chưa tìm thấy bảng NORMAL ANIMALS. Hãy gán Client List Text trên GameManager.", this);
+    }
+
+    private void UpdateClientList()
+    {
+        if (!_boardChecked)
+        {
+            _boardChecked = true;
+            ResolveClientListText();
+            _numberOnlyBoard = _clientListText != null && int.TryParse(_clientListText.text, out _);
+        }
+        if (_clientListText == null) return;
+        int treatedNormals = PatientsTreated - _treatedAnomalyIds.Count;
+        int remaining = Mathf.Max(0, patientsToInspect - anomaliesPresent - treatedNormals);
+        if (_numberOnlyBoard)
+        {
+            _clientListText.SetText("{0:0}", remaining);
+            return;
+        }
+        _clientListText.SetText("CHECK IN PATIENTS\n\nSHIFT TODAY - DAY {0:0}\nNORMAL ANIMALS\n<size=160%>{1:0}</size>", currentDay, remaining);
+    }
+
     void UpdateUI()
     {
-        if (_clientListText != null)
-            _clientListText.SetText("CHECK IN PATIENTS\n\nSHIFT TODAY - DAY {0:0}\nNORMAL ANIMALS\n<size=160%>{1:0}</size>", currentDay, Mathf.Max(0, patientsToInspect - anomaliesPresent));
+        UpdateClientList();
         if (txtShiftLabel != null)
             txtShiftLabel.text = $"SHIFT {currentDay}";
 

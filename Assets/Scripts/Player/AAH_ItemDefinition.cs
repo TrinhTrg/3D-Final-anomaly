@@ -20,6 +20,27 @@ public class AAH_ItemDefinition : ScriptableObject
     [Tooltip("Sanity restored when consumed.")]
     [SerializeField, Min(0)] private int _sanityRestore;
 
+    // Per-dose identity lets the room remove only the item issued for this order.
+    public static AAH_ItemDefinition CreateMedicine(string label, Texture2D image, GameObject bottle)
+    {
+        var item = CreateInstance<AAH_ItemDefinition>();
+        item._itemId = "medicine_" + image.name;
+        item._displayName = label;
+        item._equippedModel = bottle;
+        item._equippedEuler = bottle.transform.localEulerAngles;
+        item._equippedSize = 0.45f;
+        item._icon = Sprite.Create(image, new Rect(0f, 0f, image.width, image.height),
+            new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
+        item._ownsIcon = true;
+        return item;
+    }
+
+    private bool _ownsIcon;
+    private void OnDestroy()
+    {
+        if (_ownsIcon && _icon != null) Destroy(_icon);
+    }
+
     public string ItemId => _itemId;
     public string DisplayName => _displayName;
     public Sprite Icon => _icon;

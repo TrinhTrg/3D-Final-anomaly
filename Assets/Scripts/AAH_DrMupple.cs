@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.AI;
 using TMPro;
 
 /// <summary>
@@ -14,7 +15,7 @@ public class AAH_DrMupple : MonoBehaviour
     public GameObject muppleModel;
     public float walkInDelay = 1.5f;
     public Vector3 standPosition;      // Where he walks to (world position)
-    public float moveSpeed = 2.0f;
+    public float moveSpeed = 9f; // Fallback when the patient queue is absent.
 
     [Header("Dialogue Panel")]
     public GameObject dialoguePanel;
@@ -41,32 +42,106 @@ public class AAH_DrMupple : MonoBehaviour
         _storeExitStarted = true;
         StartCoroutine(StoreRoomExit());
     }
+    private float _walkingSpeed;
+    private Vector3 _groundPosition;
+    private Vector3 _pivotAboveGround;
+    private Quaternion _uprightRotation;
+    private Vector3 _authoredForward;
+    private Vector3 _heading;
+
+    // The current Mupple mesh faces screen-right when the navigation heading faces the desk.
+    private const float MuppleFacingOffset = 90f;
+
+    [Tooltip("Extra yaw in degrees if the imported mesh faces sideways in its standing pose.")]
+    [SerializeField] private float _modelYawCorrection;
+
+    private bool PrepareStandingPose()
+    {
+        var model = muppleModel.transform;
+        _uprightRotation = model.rotation;
+
+        _authoredForward = Vector3.ProjectOnPlane(model.forward, Vector3.up);
+        if (_authoredForward.sqrMagnitude < 0.001f)
+            _authoredForward = Vector3.Cross(model.right, Vector3.up);
+
+        foreach (var animator in model.GetComponentsInChildren<Animator>(true))
+        {
+            animator.applyRootMotion = false;
+            if (!animator.isHuman || animator.avatar == null || !animator.avatar.isValid) continue;
+            var left = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+            var right = animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            if (left == null || right == null) continue;
+            Vector3 forward = Vector3.Cross(right.position - left.position, Vector3.up);
+            if (forward.sqrMagnitude > 0.001f) _authoredForward = forward;
+        }
+        _authoredForward.Normalize();
+        _heading = _authoredForward;
+
+        Bounds bounds = default;
+        bool foundMesh = false;
+        foreach (var renderer in _renderers)
+        {
+            if (!(renderer is MeshRenderer || renderer is SkinnedMeshRenderer) || !renderer.gameObject.activeInHierarchy) continue;
+            if (foundMesh) bounds.Encapsulate(renderer.bounds);
+            else { bounds = renderer.bounds; foundMesh = true; }
+        }
+        if (!foundMesh) return false;
+        _groundPosition = new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
+        _pivotAboveGround = model.position - _groundPosition;
+        return true;
+    }
+
+    private void PlaceAt(Vector3 ground, Vector3 facing)
+    {
+        facing.y = 0f;
+        if (facing.sqrMagnitude > 0.000001f) _heading = facing.normalized;
+        float yaw = Vector3.SignedAngle(_authoredForward, _heading, Vector3.up) + MuppleFacingOffset + _modelYawCorrection;
+        var turn = Quaternion.AngleAxis(yaw, Vector3.up);
+        _groundPosition = ground;
+        muppleModel.transform.SetPositionAndRotation(ground + turn * _pivotAboveGround, turn * _uprightRotation);
+    }
+
+    private bool TryRoute(Transform target, float startRadius, out NavMeshPath path)
+    {
+        path = new NavMeshPath();
+        var filter = new NavMeshQueryFilter { agentTypeID = _storyAgentTypeId, areaMask = NavMesh.AllAreas };
+        if (!NavMesh.SamplePosition(_groundPosition, out var start, startRadius, filter) ||
+            !NavMesh.SamplePosition(target.position, out var end, 2f, filter) ||
+            Vector3.ProjectOnPlane(end.position - target.position, Vector3.up).sqrMagnitude > 1f ||
+            !NavMesh.CalculatePath(start.position, end.position, filter, path) ||
+            path.status != NavMeshPathStatus.PathComplete)
+        {
+            Debug.LogError("Mupple cannot reach " + target.name + ". Check the marker and baked NavMesh.", this);
+            return false;
+        }
+        PlaceAt(start.position, _heading);
+        return true;
+    }
+
+    private IEnumerator WalkRoute(NavMeshPath path)
+    {
+        foreach (var corner in path.corners)
+        {
+            while ((_groundPosition - corner).sqrMagnitude > 0.000001f)
+            {
+                if (_storyDoors != null)
+                    foreach (var door in _storyDoors)
+                        if (door != null && Vector3.Distance(_groundPosition, door.ApproachPosition) < 9f)
+                            door.RequestOpen();
+                var direction = corner - _groundPosition;
+                var next = Vector3.MoveTowards(_groundPosition, corner, _walkingSpeed * Time.deltaTime);
+                PlaceAt(next, direction);
+                yield return null;
+            }
+        }
+    }
+
     private IEnumerator StoreRoomExit()
     {
         if (muppleModel == null || _storeRoomDestination == null)
         { Debug.LogError("Mupple store-room destination is not assigned.", this); yield break; }
-        var filter = new UnityEngine.AI.NavMeshQueryFilter { agentTypeID = _storyAgentTypeId, areaMask = UnityEngine.AI.NavMesh.AllAreas };
-        UnityEngine.AI.NavMeshHit start, destination;
-        if (!UnityEngine.AI.NavMesh.SamplePosition(muppleModel.transform.position, out start, 2f, filter)
-            || !UnityEngine.AI.NavMesh.SamplePosition(_storeRoomDestination.position, out destination, 1f, filter))
-        { Debug.LogError("Mupple store-room route is off the hospital NavMesh.", this); yield break; }
-        var path = new UnityEngine.AI.NavMeshPath();
-        if (!UnityEngine.AI.NavMesh.CalculatePath(start.position, destination.position, filter, path)
-            || path.status != UnityEngine.AI.NavMeshPathStatus.PathComplete)
-        { Debug.LogError("Mupple has no complete path into store_room.", this); yield break; }
-        // Continue from the current NPC pose: do not snap or alter imported child transforms.
-        foreach (var corner in path.corners)
-        {
-            while (Vector3.Distance(muppleModel.transform.position, corner) > 0.1f)
-            {
-                if (_storyDoors != null) foreach (var door in _storyDoors)
-                    if (door != null && Vector3.Distance(muppleModel.transform.position, door.ApproachPosition) < 9f) door.RequestOpen();
-                Vector3 direction = corner - muppleModel.transform.position; direction.y = 0f;
-                if (direction.sqrMagnitude > 0.01f) muppleModel.transform.rotation = Quaternion.LookRotation(direction);
-                muppleModel.transform.position = Vector3.MoveTowards(muppleModel.transform.position, corner, Mathf.Max(0.1f, moveSpeed) * Time.deltaTime);
-                yield return null;
-            }
-        }
+        if (!TryRoute(_storeRoomDestination, 2f, out var path)) yield break;
+        yield return WalkRoute(path);
         HasEnteredStoreRoom = true;
         muppleModel.SetActive(false);
     }
@@ -75,6 +150,8 @@ public class AAH_DrMupple : MonoBehaviour
     {
         if (muppleModel != null)
         {
+            var body = muppleModel.GetComponent<Rigidbody>();
+            if (body != null) body.isKinematic = true;
             _renderers = muppleModel.GetComponentsInChildren<Renderer>(true);
             _colliders = muppleModel.GetComponentsInChildren<Collider>(true);
             if (muppleModel == gameObject) SetModelVisible(false);
@@ -91,34 +168,25 @@ public class AAH_DrMupple : MonoBehaviour
     public IEnumerator PlayDay1Entrance(Transform player, AAH_CheckInSequence dialogue, AAH_Day1Dialogue data)
     {
         if (activated) yield break;
+        if (muppleModel == null || dialogue == null || data == null)
+        { Debug.LogError("Day 1 Mupple references missing.", this); yield break; }
+
+        var arrivals = FindFirstObjectByType<AAH_PatientArrivalController>();
+        Transform receptionStand = arrivals != null && arrivals.StandPoint != null
+            ? arrivals.StandPoint : dialogue.patientStandPoint;
+        if (receptionStand == null)
+        { Debug.LogError("Mupple needs the patient stand point at Reception.", this); yield break; }
+        _walkingSpeed = Mathf.Max(0.1f, arrivals != null ? arrivals.WalkingSpeed : moveSpeed);
         activated = true;
         yield return new WaitForSeconds(walkInDelay);
-        if (muppleModel == null || player == null) { Debug.LogError("Day 1 Muple references missing.", this); yield break; }
-        var filter = new UnityEngine.AI.NavMeshQueryFilter { agentTypeID = _storyAgentTypeId, areaMask = UnityEngine.AI.NavMesh.AllAreas };
-        UnityEngine.AI.NavMeshHit start, destination;
-        Vector3 target = player.position + player.forward * 5f;
-        if (!UnityEngine.AI.NavMesh.SamplePosition(muppleModel.transform.position, out start, 12f, filter)
-            || !UnityEngine.AI.NavMesh.SamplePosition(target, out destination, 6f, filter))
-        { Debug.LogError("Day 1 Muple entrance is off NavMesh.", this); yield break; }
-        var path = new UnityEngine.AI.NavMeshPath();
-        if (!UnityEngine.AI.NavMesh.CalculatePath(start.position, destination.position, filter, path)
-            || path.status != UnityEngine.AI.NavMeshPathStatus.PathComplete)
-        { Debug.LogError("Day 1 Muple cannot reach player.", this); yield break; }
-        muppleModel.SetActive(true); SetModelVisible(true);
-        muppleModel.transform.position = start.position;
-        foreach (var corner in path.corners)
-        {
-            while (Vector3.Distance(muppleModel.transform.position, corner) > 0.1f)
-            {
-                if (_storyDoors != null) foreach (var door in _storyDoors)
-                    if (door != null && Vector3.Distance(muppleModel.transform.position, door.ApproachPosition) < 9f) door.RequestOpen();
-                muppleModel.transform.position = Vector3.MoveTowards(muppleModel.transform.position, corner, Mathf.Max(0.1f, moveSpeed) * Time.deltaTime);
-                yield return null;
-            }
-        }
-        Vector3 facing = player.position - muppleModel.transform.position; facing.y = 0f;
-        if (facing.sqrMagnitude > 0.01f) muppleModel.transform.rotation = Quaternion.LookRotation(facing);
-        yield return dialogue.ShowStoryDialogue("Bác sĩ Muple", data, data.Mupple);
+        muppleModel.SetActive(true);
+        SetModelVisible(true);
+        if (!PrepareStandingPose())
+        { Debug.LogError("Mupple model has no visible mesh.", this); yield break; }
+        if (!TryRoute(receptionStand, 12f, out var path)) yield break;
+        yield return WalkRoute(path);
+        PlaceAt(_groundPosition, receptionStand.forward);
+        yield return dialogue.ShowStoryDialogue("Bác sĩ Mupple", data, data.Mupple);
         Day1DialogueCompleted?.Invoke();
     }
     public event System.Action Day1DialogueCompleted;
