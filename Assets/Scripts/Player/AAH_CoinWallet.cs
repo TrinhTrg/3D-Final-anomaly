@@ -19,11 +19,33 @@ public interface IAAH_CoinWallet
 public static class AAH_CoinWallet
 {
     private static IAAH_CoinWallet _current;
+    private static bool _carryCoinsToDay2;
+
+    public static void CarryCoinsToDay2()
+    {
+        _carryCoinsToDay2 = true;
+    }
+
+    public static string BeginHospitalShift(int day, string sceneName)
+    {
+        bool continuing = sceneName == AAH_ShiftEndUI.Day2Scene && _carryCoinsToDay2;
+        _carryCoinsToDay2 = false;
+        var wallet = Current;
+        bool hospital = sceneName == "Hospital_day1" || sceneName == AAH_ShiftEndUI.Day2Scene;
+        if (hospital && !continuing && wallet is AAH_JsonCoinWallet local)
+            return local.StartFreshShift(day);
+        return wallet.GetOrCreateShift(day);
+    }
+
     public static IAAH_CoinWallet Current => _current ?? (_current = new AAH_JsonCoinWallet(Path.Combine(Application.persistentDataPath, "animal-coins.json")));
     // Supply a server-backed implementation here when multiplayer is introduced.
     public static void SetProvider(IAAH_CoinWallet wallet) { _current = wallet ?? throw new ArgumentNullException(nameof(wallet)); }
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    private static void ResetProvider() { _current = null; }
+    private static void ResetProvider()
+    {
+        _current = null;
+        _carryCoinsToDay2 = false;
+    }
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void LoadAtStartup() { var wallet = Current; }
 }
@@ -118,7 +140,19 @@ public sealed class AAH_JsonCoinWallet : IAAH_CoinWallet
         if (day < 1) throw new ArgumentOutOfRangeException(nameof(day));
         // Reloading/restarting the same day reuses the reward namespace, preventing repeat payouts.
         if (_data.activeDay == day && !string.IsNullOrEmpty(_data.activeShiftId)) return _data.activeShiftId;
-        var next = Copy(); next.activeDay = day; next.activeShiftId = Guid.NewGuid().ToString("N");
+        return SaveNewShift(day, Copy());
+    }
+
+    internal string StartFreshShift(int day)
+    {
+        var fresh = new SaveData { unlockedCharacters = new List<string>(_data.unlockedCharacters) };
+        return SaveNewShift(day, fresh);
+    }
+
+    private string SaveNewShift(int day, SaveData next)
+    {
+        next.activeDay = day;
+        next.activeShiftId = Guid.NewGuid().ToString("N");
         if (!Commit(next)) throw new IOException("Could not persist shift identity; rewards are disabled for this shift.");
         return _data.activeShiftId;
     }

@@ -13,25 +13,46 @@ public sealed class AAH_ReceptionShutter : MonoBehaviour
     [Header("Motion")]
     [SerializeField, Min(0.1f)] private float _travelDuration = 2f;
     [SerializeField] private bool _startClosed;
-    private float _from, _to, _elapsed;
+    private float _from, _to, _elapsed, _motionDuration;
     private bool _closed;
+    private AAH_PatientActor _visitorAtClose;
     public bool IsClosed => _closed;
     public bool IsMoving { get; private set; }
     public float Closure { get; private set; }
     // A future authoritative network adapter can call SetClosed on replicated state.
     public event Action<bool> TargetChanged;
     private void Awake() { SnapTo(_startClosed); }
-    public void Toggle() { SetClosed(!_closed); }
+    public void Toggle()
+    {
+        SetClosed(!_closed);
+        var desk = AAH_CheckInSequence.Instance;
+        if (_closed && desk != null && desk.CanRefuseVisitor)
+        {
+            _visitorAtClose = desk.CurrentPatient;
+            if (!IsMoving) NotifyFullyClosed();
+        }
+    }
+    private void NotifyFullyClosed()
+    {
+        var visitor = _visitorAtClose;
+        _visitorAtClose = null;
+        var desk = AAH_CheckInSequence.Instance;
+        if (visitor != null && desk != null && desk.CurrentPatient == visitor)
+            desk.TryRefuseVisitor(this);
+    }
     public void SetClosed(bool closed)
     {
         if (_closed == closed) return;
+        _visitorAtClose = null;
         _closed = closed;
         _from = Closure; _to = closed ? 1f : 0f; _elapsed = 0f;
+        _motionDuration = Mathf.Max(0.001f, _travelDuration * Mathf.Abs(_to - _from));
         IsMoving = !Mathf.Approximately(_from, _to);
         TargetChanged?.Invoke(closed);
     }
     public void SnapTo(bool closed)
     {
+        _visitorAtClose = null;
         _closed = closed; IsMoving = false;
         Closure = closed ? 1f : 0f;
         _from = _to = Closure; _elapsed = 0f;
@@ -41,10 +62,11 @@ public sealed class AAH_ReceptionShutter : MonoBehaviour
     {
         if (!IsMoving) return;
         _elapsed += Time.deltaTime;
-        float t = Mathf.Clamp01(_elapsed / _travelDuration);
+        float t = Mathf.Clamp01(_elapsed / _motionDuration);
         Closure = Mathf.Lerp(_from, _to, t * t * (3f - 2f * t));
         if (t >= 1f) { Closure = _to; IsMoving = false; }
         ApplyCurtain();
+        if (!IsMoving && _closed) NotifyFullyClosed();
     }
     private void ApplyCurtain()
     {

@@ -10,7 +10,7 @@ using TMPro;
 /// 2. Bảng kẹp giấy (Clipboard): Mở UI giấy tờ, ký xác nhận.
 /// 3. Máy ảnh trên chân máy (Camera): Flash, chụp ảnh bệnh nhân, ảnh Polaroid hiện dần trong 3s trong thời gian hiển thị 15 giây.
 /// 4. Máy tính (Computer): Tiến trình "REGISTERING..." chạy thanh progress bar.
-/// 5. Máy in (Printer): Nhấn E in ra thẻ/giấy chỉ định phòng (tổng 6 phòng).
+/// 5. Máy in (Printer): Nhấn E in ra thẻ/giấy chỉ định phòng (5 phòng điều trị).
 /// 6. Hoàn tất: Bắn sự kiện OnPatientCheckedIn -> Bệnh nhân chuyển sang Leaving.
 /// </summary>
 public class AAH_CheckInSequence : MonoBehaviour
@@ -107,6 +107,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     private Sprite _photoSprite;
     private Coroutine _operation;
     private Vector3 _clipboardDeskPosition;
+    private const float RefusalDelaySeconds = 5f;
     [Header("Day 1 story")]
     [SerializeField] private AAH_Day1Dialogue _day1Dialogue;
     private bool _storyDialogue;
@@ -128,6 +129,43 @@ public class AAH_CheckInSequence : MonoBehaviour
         }
         panelDialogue.SetActive(false);
         _storyDialogue = false; SetStep(currentStep);
+    }
+    private bool _refusalInProgress;
+    public bool HasModalInteraction => _modal;
+    public bool CanRefuseVisitor => _patient != null && !_sentCompletion && !_modal && !_storyDialogue && !_refusalInProgress &&
+        (currentStep == CheckInStep.PatientDialogue || (!_busy && currentStep >= CheckInStep.Step1_Clipboard && currentStep <= CheckInStep.Step4_PrinterRoomCard));
+    public bool TryRefuseVisitor(AAH_ReceptionShutter shutter)
+    {
+        var game = AAH_GameManager.Instance;
+        if (game == null || game.currentDay != 2 || game.shiftEnded || shutter == null || !CanRefuseVisitor) return false;
+        if (_operation != null) StopCoroutine(_operation);
+        CancelAmbientDialogue();
+        _refusalInProgress = true;
+        _busy = true;
+        HidePanels();
+        SetStep(CheckInStep.PatientDialogue);
+        _operation = StartCoroutine(RefusalRoutine(_patient, game));
+        return true;
+    }
+    private IEnumerator RefusalRoutine(AAH_PatientActor visitor, AAH_GameManager game)
+    {
+        string complaint = visitor.IsAnomaly ? "Mở… mở ra. Tôi đã tập cười giống hệt người đến trước mà."
+            : visitor.DisplayName == "Polly" ? "Lại phải về sao? Tôi đã xin nghỉ cả buổi chỉ để đến khám."
+            : UnityEngine.Random.value < 0.5f ? "Tôi còn chưa nói xong! Ít ra cũng cho tôi biết vì sao chứ."
+            : "Tôi đã chờ từ sáng. Bác sĩ định để tôi về thế này thật à?";
+        if (txtDialogueContent != null) txtDialogueContent.text = "<b>" + visitor.DisplayName + "</b>\n" + complaint;
+        if (panelDialogue != null) panelDialogue.SetActive(true);
+        yield return new WaitForSeconds(RefusalDelaySeconds);
+        if (panelDialogue != null) panelDialogue.SetActive(false);
+        roomRegistry.ReleaseRoom(visitor.PatientId);
+        game.RecordDeskRefusal(visitor);
+        Vector3 start = visitor.transform.position;
+        visitor.WalkOutFromDesk();
+        while (visitor.gameObject.activeSelf && !visitor.IsAwayFrom(start)) yield return null;
+        _refusalInProgress = false;
+        _operation = null;
+        _busy = false;
+        ClearDesk();
     }
     public bool HasPatient => _patient != null;
     public AAH_PatientActor CurrentPatient => _patient;
@@ -161,6 +199,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     void Awake()
     {
         Instance = this;
+        AAH_InteractionHints.Center(txtInteractionPrompt);
         if (cardPolaroidHUD != null) cardPolaroidHUD.SetActive(false);
         if (stepClipboard != null) _clipboardDeskPosition = stepClipboard.transform.position;
     }
@@ -190,8 +229,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     {
         if (!ReadyForPatient || patient == null) return false;
         CancelAmbientDialogue();
-        _reservedRoom = roomRegistry.Reserve(patient.PatientId);
-        if (_reservedRoom == null) return false;
+        _reservedRoom = null;
         _patient = patient; activePatientObject = patient.gameObject;
         patientName = patient.DisplayName; patientDialogue = patient.Dialogue; _sentCompletion = false;
         ResetSteps(); HidePanels(); SetStep(CheckInStep.PatientApproaching);
@@ -212,12 +250,27 @@ public class AAH_CheckInSequence : MonoBehaviour
         if (_photoSprite != null && Time.unscaledTimeAsDouble >= _photoExpiresAt)
             HidePhoto();
         if (txtQueueSummary != null && roomRegistry != null)
-            txtQueueSummary.text = roomRegistry.FreeCount == 0 && _patient == null ? "Đang chờ phòng trống (6/6)" : "Tiếp nhận: " + (_patient != null ? patientName : "Chờ bệnh nhân") + " | Phòng trống: " + roomRegistry.FreeCount + "/6";
+        {
+            int freeRooms = roomRegistry.FreeCount;
+            string reception = _patient != null ? patientName : freeRooms == 0 ? "Chờ phòng trống" : "Chờ bệnh nhân";
+            txtQueueSummary.text = $"Tiếp nhận: {reception} | Phòng trống: {freeRooms}/{AAH_RoomRegistry.TreatmentRoomCount}";
+        }
         if (_patient != null && _sentCompletion && _patient.IsAwayFrom(patientStandPoint.position)) ClearDesk();
+    }
+    public Vector3 DeskForward(Transform stand)
+    {
+        if (bellVisual != null)
+        {
+            Vector3 towardCounter = Vector3.ProjectOnPlane(bellVisual.position - stand.position, Vector3.up);
+            if (towardCounter.sqrMagnitude > 0.01f) return towardCounter.normalized;
+        }
+        return stand.forward;
     }
     private void HandlePatientArrived(AAH_PatientActor patient)
     {
         if (patient != _patient || currentStep != CheckInStep.PatientApproaching) return;
+        if (patientStandPoint != null)
+            patient.FacePhotoCamera(patient.VisualBounds.center + DeskForward(patientStandPoint));
         _busy = true; _operation = StartCoroutine(PatientDialogueRoutine());
     }
     private IEnumerator PatientDialogueRoutine()
@@ -304,6 +357,7 @@ public class AAH_CheckInSequence : MonoBehaviour
         if (panelFlash != null) { panelFlash.SetActive(true); yield return new WaitForSeconds(0.12f); panelFlash.SetActive(false); }
         float elapsed = 0f;
         while (elapsed < photoDevelopDuration) { elapsed += Time.deltaTime; imgPolaroidPhoto.color = Color.Lerp(Color.black, Color.white, elapsed / photoDevelopDuration); yield return null; }
+        AAH_PolaroidNoise.SetFor(imgPolaroidPhoto, CurrentPatient != null && CurrentPatient.IsAnomaly);
         imgPolaroidPhoto.color = Color.white; stepCameraTripod.MarkCompleted(); _busy = false;
         SetStep(CheckInStep.Step3_ComputerRegister); _operation = null;
     }
@@ -311,7 +365,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     {
         if (photoCaptureCamera == null || imgPolaroidPhoto == null || cardPolaroidHUD == null || txtPolaroidName == null) throw new InvalidOperationException("Photo UI/camera missing");
         var bounds = _patient.VisualBounds;
-        photoCaptureCamera.transform.position = bounds.center + patientStandPoint.forward * 4.5f + Vector3.up * 0.6f;
+        photoCaptureCamera.transform.position = bounds.center + DeskForward(patientStandPoint) * 4.5f + Vector3.up * 0.6f;
         _patient.FacePhotoCamera(photoCaptureCamera.transform.position);
         bounds = _patient.VisualBounds;
         photoCaptureCamera.transform.LookAt(bounds.center + Vector3.up * 0.7f);
@@ -372,7 +426,9 @@ public class AAH_CheckInSequence : MonoBehaviour
     }
     private void HandlePrinterInteracted()
     {
-        if (!Accept(CheckInStep.Step4_PrinterRoomCard) || _reservedRoom == null) return;
+        if (!Accept(CheckInStep.Step4_PrinterRoomCard)) return;
+        _reservedRoom = roomRegistry.Reserve(_patient.PatientId);
+        if (_reservedRoom == null) return;
         _busy = true; SetStep(currentStep); _operation = StartCoroutine(PrintRoutine());
     }
     private IEnumerator PrintRoutine()
@@ -394,9 +450,18 @@ public class AAH_CheckInSequence : MonoBehaviour
         if (stepClipboard != null) stepClipboard.gameObject.SetActive(false);
         SetStep(CheckInStep.Idle_WaitingBell);
     }
+    public void RemoveDeceased(AAH_PatientActor actor)
+    {
+        if (actor != _patient) return;
+        _refusalInProgress = false;
+        CancelAmbientDialogue();
+        HandleNavigationFailed(actor);
+        ResetSteps();
+    }
+
     private void HandleNavigationFailed(AAH_PatientActor patient)
     {
-        if (patient != _patient) return;
+        if (patient != _patient || _refusalInProgress) return;
         if (!_sentCompletion) roomRegistry.ReleaseRoom(patient.PatientId);
         if (_operation != null) StopCoroutine(_operation);
         _operation = null; _busy = false; RestoreModal(); HidePanels(); ClearDesk();
@@ -404,6 +469,7 @@ public class AAH_CheckInSequence : MonoBehaviour
     private void PlaySound(AudioClip clip) { if (clip != null && audioSource != null) audioSource.PlayOneShot(clip); }
     void OnDisable()
     {
+        _refusalInProgress = false;
         HidePhoto();
         StopAllCoroutines(); _operation = null; _busy = false; RestoreModal(); HidePanels();
         if (stepClipboard != null) stepClipboard.OnInteracted -= HandleClipboardInteracted;

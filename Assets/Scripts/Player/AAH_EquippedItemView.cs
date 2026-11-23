@@ -40,7 +40,7 @@ public class AAH_EquippedItemView : MonoBehaviour
 
     private void Refresh()
     {
-        var item = _inventory != null ? _inventory.SelectedItem : null;
+        var item = _inventory != null && !_inventory.BodyCarried ? _inventory.SelectedItem : null;
         if (item == _shownItem && (_instance != null || item == null || item.EquippedModel == null)) return;
         if (_instance != null)
         {

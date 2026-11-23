@@ -78,10 +78,10 @@ public partial class AAH_RoomTreatmentSequence
     {
         foreach (var order in _orders)
         {
+            if (order.source != null) order.source.SetActive(true);
             if (order.item == null) continue;
             if (_inventory != null && _inventory.GetItem(order.slot) == order.item)
                 _inventory.RemoveAt(order.slot);
-            if (order.source != null) order.source.SetActive(true);
             Destroy(order.item);
         }
         _orders.Clear();
@@ -148,7 +148,7 @@ public partial class AAH_RoomTreatmentSequence
     private bool SelectDeliveryTarget()
     {
         _focusedOrder = -1; _focusedBottle = null;
-        if (!OwnsDelivery()) return false;
+        if (!OwnsDelivery() || (_inventory != null && _inventory.BodyCarried)) return false;
         if (_playerCamera == null || _patient == null || _patient.State != AAH_PatientActor.PatientState.AtBed || Time.timeScale <= 0f || (_checkIn != null && _checkIn.BlocksWorldInteraction)) return false;
         RaycastHit hit;
         if (!Physics.Raycast(_playerCamera.transform.position, _playerCamera.transform.forward, out hit, _rayDistance, ~0, QueryTriggerInteraction.Collide)) return false;
@@ -198,6 +198,22 @@ public partial class AAH_RoomTreatmentSequence
         DeliveredMedicineCount++;
         if (DeliveredMedicineCount == _orders.Count) StartRecovery();
     }
+    public bool DiscardSelectedDose(AAH_PlayerInventory inventory)
+    {
+        if (inventory != _inventory) return false;
+        var order = SelectedMedicineOrder();
+        if (order == null) return false;
+        inventory.RemoveAt(order.slot);
+        if (order.source != null) order.source.SetActive(true);
+        Destroy(order.item);
+        order.item = null;
+        order.source = null;
+        order.slot = -1;
+        order.collected = false;
+        CollectedMedicineCount--;
+        return true;
+    }
+
     private MedicineOrder SelectedMedicineOrder()
     {
         if (_inventory == null || _inventory.SelectedItem == null) return null;
@@ -279,6 +295,7 @@ public partial class AAH_RoomTreatmentSequence
         if (_treatmentPanel != null) _treatmentPanel.SetActive(false);
         if (_patientCollider != null) _patientCollider.enabled = false;
         Stage = TreatmentStage.Discharged;
+        while (_patient != null && _patient.ThreatPending) yield return null;
         if (_patient != null) PatientRecovered?.Invoke(_patient);
         while (_patient != null && _patient.HoldDischarge) yield return null;
         if (_patient != null) _patient.LeaveHospital(_hospitalExit);

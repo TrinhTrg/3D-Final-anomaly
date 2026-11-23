@@ -100,6 +100,36 @@ public class AAH_GameManager : MonoBehaviour
         }
     }
     // Outcome hooks: call only when the corresponding gameplay outcome actually occurs.
+    private readonly HashSet<string> _refusedNormals = new HashSet<string>();
+    private readonly HashSet<string> _deadNormals = new HashSet<string>();
+    public void BeginDay2(int visitors)
+    {
+        patientsToInspect = visitors;
+        anomaliesPresent = 1;
+        SetDay1Objective("Ngày 2: Tiếp nhận bệnh nhân. Dùng cửa sập khi phát hiện khách bất thường.");
+    }
+    public bool HasDay2Outcome(string id) => _treatedPatientIds.Contains(id) ||
+        _rejectedAnomalyIds.Contains(id) || _refusedNormals.Contains(id) || _deadPatientIds.Contains(id);
+    public void RecordDeskRefusal(AAH_PatientActor visitor)
+    {
+        if (currentDay != 2 || shiftEnded || visitor == null || HasDay2Outcome(visitor.PatientId)) return;
+        if (visitor.IsAnomaly) RecordAnomalyRejected(visitor.PatientId);
+        else
+        {
+            _refusedNormals.Add(visitor.PatientId);
+            RecordVisitor(visitor.PatientId);
+            if (_soloSanity != null) _soloSanity.ApplyChange(-10);
+        }
+        UpdateUI();
+    }
+    public void CompleteDay2Story()
+    {
+        if (currentDay != 2 || shiftEnded) return;
+        shiftEnded = true;
+        shiftActive = false;
+        SetDay1Objective("Ngày 2 hoàn tất.");
+        ShowShiftEndPanel();
+    }
     public void RecordVisitor(string visitorId)
     {
         if (!shiftEnded && !string.IsNullOrWhiteSpace(visitorId)) _visitorIds.Add(visitorId);
@@ -108,29 +138,91 @@ public class AAH_GameManager : MonoBehaviour
     {
         if (shiftEnded || string.IsNullOrWhiteSpace(visitorId)) return;
         _visitorIds.Add(visitorId);
-        _rejectedAnomalyIds.Add(visitorId);
+        if (!_rejectedAnomalyIds.Add(visitorId)) return;
         AwardCoins("anomaly-rejected:" + visitorId, _coinsPerBlockedAnomaly);
     }
     public void RecordPatientDeath(string patientId)
     {
         if (shiftEnded || string.IsNullOrWhiteSpace(patientId)) return;
         _visitorIds.Add(patientId);
-        _deadPatientIds.Add(patientId);
-        if (_treatedPatientIds.Remove(patientId))
+        if (!_deadPatientIds.Add(patientId)) return;
+        foreach (var victim in FindObjectsByType<AAH_PatientActor>(FindObjectsSortMode.None))
         {
-            _treatedAnomalyIds.Remove(patientId);
-            UpdateClientList();
+            if (victim.gameObject.scene != gameObject.scene || victim.PatientId != patientId) continue;
+            if (!victim.IsAnomaly && !_refusedNormals.Contains(victim.PatientId)) _deadNormals.Add(victim.PatientId);
+            victim.FallToFloor();
+            if (_reportCheckIn != null) _reportCheckIn.RemoveDeceased(victim);
+            foreach (var room in FindObjectsByType<AAH_RoomTreatmentSequence>(FindObjectsSortMode.None))
+                if (room.gameObject.scene == gameObject.scene) room.RemoveDeceased(victim);
+            break;
         }
+        _treatedPatientIds.Remove(patientId);
+        _treatedAnomalyIds.Remove(patientId);
+        UpdateClientList();
         if (_coinWallet != null) _coinWallet.RecordShiftDeath(_coinShiftId, patientId);
     }
+    public bool HasPendingAttack()
+    {
+        foreach (var actor in FindObjectsByType<AAH_PatientActor>(FindObjectsSortMode.None))
+            if (actor.gameObject.scene == gameObject.scene && actor.ThreatPending) return true;
+        return false;
+    }
+
+    internal MonoBehaviour NearestHuntTarget(AAH_PatientActor attacker)
+    {
+        MonoBehaviour nearest = null;
+        float best = float.PositiveInfinity;
+        Vector3 origin = attacker.VisualBounds.center;
+        void Consider(MonoBehaviour target)
+        {
+            if (!attacker.IsLivingTarget(target)) return;
+            float distance = (AAH_PatientActor.TargetBounds(target).center - origin).sqrMagnitude;
+            if (distance >= best) return;
+            best = distance;
+            nearest = target;
+        }
+
+        foreach (var patient in FindObjectsByType<AAH_PatientActor>(FindObjectsSortMode.None))
+            Consider(patient);
+        foreach (var player in AAH_PlayerSanity.All) Consider(player);
+        return nearest;
+    }
+
+    internal bool TryResolveAttack(AAH_PatientActor attacker, MonoBehaviour target)
+    {
+        if (shiftEnded || !shiftActive || !attacker.CanStrike(target)) return false;
+        if (target is AAH_PlayerSanity player)
+        {
+            player.ApplyChange(-player.Max);
+            EndSoloGame();
+        }
+        else if (target is AAH_PatientActor victim)
+        {
+            RecordPatientDeath(victim.PatientId);
+        }
+        return true;
+    }
+
+    private void EndSoloGame()
+    {
+        if (shiftEnded) return;
+        shiftEnded = true;
+        shiftActive = false;
+        gameObject.AddComponent<AAH_SoloGameOver>();
+    }
+
+    private AAH_PlayerSanity _soloSanity;
     private void OnEnable()
     {
+        _soloSanity = FindFirstObjectByType<AAH_PlayerSanity>();
+        if (_soloSanity != null) _soloSanity.Depleted += EndSoloGame;
         if (_reportCheckIn != null) _reportCheckIn.OnPatientCheckedIn += CountCheckIn;
         if (_reportTreatmentRooms != null) foreach (var room in _reportTreatmentRooms)
             if (room != null) room.PatientRecovered += CountTreatment;
     }
     private void OnDisable()
     {
+        if (_soloSanity != null) _soloSanity.Depleted -= EndSoloGame;
         if (_reportCheckIn != null) _reportCheckIn.OnPatientCheckedIn -= CountCheckIn;
         if (_reportTreatmentRooms != null) foreach (var room in _reportTreatmentRooms)
             if (room != null) room.PatientRecovered -= CountTreatment;
@@ -187,7 +279,7 @@ public class AAH_GameManager : MonoBehaviour
         try
         {
             _coinWallet = AAH_CoinWallet.Current;
-            _coinShiftId = _coinWallet.GetOrCreateShift(currentDay);
+            _coinShiftId = AAH_CoinWallet.BeginHospitalShift(currentDay, gameObject.scene.name);
         }
         catch (System.Exception e)
         {
@@ -197,6 +289,10 @@ public class AAH_GameManager : MonoBehaviour
 
     void Start()
     {
+        var player = FindFirstObjectByType<SC_FPSController>();
+        if (player != null && player.GetComponent<AAH_HospitalHands>() == null)
+            player.gameObject.AddComponent<AAH_HospitalHands>();
+        AAH_InteractionHints.CenterScenePrompts(gameObject.scene);
         UpdateUI();
         if (panelShiftEnd != null)
             panelShiftEnd.SetActive(false);
@@ -217,7 +313,7 @@ public class AAH_GameManager : MonoBehaviour
 
     void CheckShiftComplete()
     {
-        if (_requireDay1Story && currentDay == 1) return;
+        if (currentDay == 2 || (_requireDay1Story && currentDay == 1)) return;
         if (patientsInspected >= patientsToInspect && !shiftEnded)
         {
             shiftEnded = true;
@@ -300,7 +396,7 @@ public class AAH_GameManager : MonoBehaviour
         }
         if (_clientListText == null) return;
         int treatedNormals = PatientsTreated - _treatedAnomalyIds.Count;
-        int remaining = Mathf.Max(0, patientsToInspect - anomaliesPresent - treatedNormals);
+        int remaining = Mathf.Max(0, patientsToInspect - anomaliesPresent - treatedNormals - _refusedNormals.Count - _deadNormals.Count);
         if (_numberOnlyBoard)
         {
             _clientListText.SetText("{0:0}", remaining);
@@ -317,7 +413,7 @@ public class AAH_GameManager : MonoBehaviour
 
         if (txtObjective != null)
         {
-            if (_requireDay1Story && currentDay == 1)
+            if (currentDay == 2 || (_requireDay1Story && currentDay == 1))
                 txtObjective.text = _day1Objective;
             else if (!shiftEnded)
                 txtObjective.text = $"Inspect patients at Reception\nInspected: {patientsInspected}/{patientsToInspect}";

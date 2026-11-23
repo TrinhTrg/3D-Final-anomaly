@@ -77,6 +77,25 @@ public class AAH_Day1Story : MonoBehaviour
         yield return _dialogue.ShowStoryDialogue("Polly", _data, _data.Recovery);
         if (_polly != null) _polly.HoldDischarge = false;
     }
+    public void EndDay2Queue()
+    {
+        if (_gameManager == null || _gameManager.currentDay != 2 || _muppleEntranceStarted) return;
+        if (_mupple == null || _data == null || _dialogue == null || _dialogue.panelDialogue == null || _dialogue.txtDialogueContent == null)
+        {
+            Debug.LogError("Thiếu tham chiếu Mupple hoặc phần hội thoại trong scene Ngày 2.", this);
+            return;
+        }
+        _muppleEntranceStarted = true;
+        _gameManager.SetDay1Objective("Ngày 2: Gặp bác sĩ Mupple ở quầy lễ tân.");
+        StartCoroutine(_mupple.PlayDay2Entrance(_player, _dialogue, _data, FinishDay2));
+    }
+    private void FinishDay2()
+    {
+        if (Completed) return;
+        Completed = true;
+        _mupple.TriggerStoreRoomExit();
+        _gameManager.CompleteDay2Story();
+    }
     private void OnMuppleCompleted()
     {
         if (!IsDay1 || !_muppleEntranceStarted || Completed) return;

@@ -8,18 +8,18 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/menu.unity
     guid: 3fc9e71ba5723774a9939db1aa259f13
-  - enabled: 0
-    path: Assets/Scenes/level1.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Scenes/Hospital_day1.unity
+    guid: 69ea6854526011e4981be2e3e7abcbfd
   - enabled: 1
     path: Assets/Scenes/Hospital_day2.unity
     guid: 9bf0c150070b1824bb34d8739e95fab0
   - enabled: 0
+    path: Assets/Scenes/level1.unity
+    guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 0
     path: Assets/Scenes/jumpscare.unity
     guid: 44766e45c9797924e95ee8d391b67558
-  - enabled: 1
-    path: Assets/Scenes/Hospital_day1.unity
-    guid: 69ea6854526011e4981be2e3e7abcbfd
   m_configObjects:
     com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

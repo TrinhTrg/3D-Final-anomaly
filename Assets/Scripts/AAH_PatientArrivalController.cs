@@ -25,6 +25,17 @@ public class AAH_PatientArrivalController : MonoBehaviour
         string error;
         if (_gameManager == null || _gameManager.currentDay < 1 || _sequence == null || _rooms == null || !_rooms.ValidateConfiguration(out error) || _spawn == null || _entrance == null || _stand == null)
         { Debug.LogError("Patient arrival configuration is incomplete (day manager, room routes, or spawn references).", this); enabled = false; return; }
+        if (_gameManager.currentDay == 2)
+        {
+            var roster = Resources.Load<AAH_Day2Visitors>("VetNightmare/Day2Visitors");
+            var polly = _patients == null ? null : System.Array.Find(_patients, p => p != null && p.displayName == "Polly");
+            if (roster == null || !roster.TryCreateQueue(polly, out _patients))
+            {
+                Debug.LogError("Ngày 2 thiếu Moratter, Polly hoặc hai model bệnh nhân. Kiểm tra danh sách Polly và chọn Tools > Vet Nightmare > Sync Day 2 visitors.", this);
+                return;
+            }
+            _gameManager.BeginDay2(_patients.Length);
+        }
         StartCoroutine(QueueRoutine());
     }
     private IEnumerator QueueRoutine()
@@ -52,8 +63,30 @@ public class AAH_PatientArrivalController : MonoBehaviour
             actor.AssignIllness(_gameManager.currentDay, _nextPatient + 1);
             go.SetActive(true);
             if (!_sequence.BeginPatient(actor)) { Destroy(go); yield return null; continue; }
+            string visitorId = actor.PatientId;
             _nextPatient++; actor.Approach(_entrance, _stand);
             while (_sequence.HasPatient) yield return null;
+            if (_gameManager.currentDay == 2)
+            {
+                while (!_gameManager.HasDay2Outcome(visitorId) && !(actor != null && actor.IsAnomaly && actor.HasEnteredExamRoom))
+                {
+                    if (actor.State == AAH_PatientActor.PatientState.Blocked)
+                    {
+                        Debug.LogError("Ngày 2 dừng ở " + actor.DisplayName + ". Kiểm tra NavMesh và các điểm đến.", this);
+                        yield break;
+                    }
+                    yield return null;
+                }
+                if (_nextPatient == _patients.Length)
+                {
+                    while (_gameManager.HasPendingAttack()) yield return null;
+                    if (_gameManager.shiftEnded) yield break;
+                    var story = FindFirstObjectByType<AAH_Day1Story>();
+                    if (story != null) story.EndDay2Queue();
+                    else Debug.LogError("Ngày 2 thiếu component AAH_Day1Story có tham chiếu tới bác sĩ.", this);
+                    yield break;
+                }
+            }
             yield return new WaitForSeconds(_arrivalDelay);
         }
     }

@@ -72,6 +72,7 @@ public class AAH_ShiftEndUI : MonoBehaviour
         {
             if (SceneManager.LoadSceneAsync(Day2Scene, LoadSceneMode.Single) == null)
                 throw new System.InvalidOperationException("Không thể mở Hospital_day2.");
+            AAH_CoinWallet.CarryCoinsToDay2();
             Time.timeScale = 1f;
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;

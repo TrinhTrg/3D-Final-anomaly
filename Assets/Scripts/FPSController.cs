@@ -24,6 +24,9 @@ public class SC_FPSController : MonoBehaviour
     void Start()
     {
         characterController = GetComponent<CharacterController>();
+        if (GetComponentInChildren<AAH_PlayerDoorInteractor>(true) == null &&
+            (FindFirstObjectByType<AAH_PatientDoorAccess>() != null || FindFirstObjectByType<AAH_AutoDoor>() != null))
+            gameObject.AddComponent<AAH_PlayerDoorInteractor>();
 
         // Lock cursor
         Cursor.lockState = CursorLockMode.Locked;

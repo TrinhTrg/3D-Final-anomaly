@@ -167,6 +167,19 @@ public class AAH_DrMupple : MonoBehaviour
     }
     public IEnumerator PlayDay1Entrance(Transform player, AAH_CheckInSequence dialogue, AAH_Day1Dialogue data)
     {
+        return PlayStoryEntrance(dialogue, data, data != null ? data.Mupple : null, () => Day1DialogueCompleted?.Invoke());
+    }
+    public IEnumerator PlayDay2Entrance(Transform player, AAH_CheckInSequence dialogue, AAH_Day1Dialogue data, System.Action done)
+    {
+        var lines = new[] {
+            new AAH_Day1Dialogue.Line("day2.mupple.log", "Đưa tôi xem sổ trực một chút. Ừ… đủ lượt rồi."),
+            new AAH_Day1Dialogue.Line("day2.mupple.voice", "Lúc nãy tôi nghe tiếng cậu gọi ngoài cổng. Nhưng cậu vẫn đứng ở quầy, đúng chứ?"),
+            new AAH_Day1Dialogue.Line("day2.mupple.end", "Tối nay cứ để cửa quầy đóng. Cậu bàn giao ca được rồi.")
+        };
+        return PlayStoryEntrance(dialogue, data, lines, done);
+    }
+    private IEnumerator PlayStoryEntrance(AAH_CheckInSequence dialogue, AAH_Day1Dialogue data, AAH_Day1Dialogue.Line[] lines, System.Action done)
+    {
         if (activated) yield break;
         if (muppleModel == null || dialogue == null || data == null)
         { Debug.LogError("Day 1 Mupple references missing.", this); yield break; }
@@ -185,9 +198,9 @@ public class AAH_DrMupple : MonoBehaviour
         { Debug.LogError("Mupple model has no visible mesh.", this); yield break; }
         if (!TryRoute(receptionStand, 12f, out var path)) yield break;
         yield return WalkRoute(path);
-        PlaceAt(_groundPosition, receptionStand.forward);
-        yield return dialogue.ShowStoryDialogue("Bác sĩ Mupple", data, data.Mupple);
-        Day1DialogueCompleted?.Invoke();
+        PlaceAt(_groundPosition, dialogue.DeskForward(receptionStand));
+        yield return dialogue.ShowStoryDialogue("Bác sĩ Mupple", data, lines);
+        done?.Invoke();
     }
     public event System.Action Day1DialogueCompleted;
 

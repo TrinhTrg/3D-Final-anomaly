@@ -18,6 +18,13 @@ public class AAH_PlayerInventory : MonoBehaviour
 
     public int SelectedIndex { get; private set; } = 0;
     public AAH_ItemDefinition SelectedItem => _slots[SelectedIndex];
+    public bool BodyCarried { get; private set; }
+    public void SetBodyCarried(bool carried)
+    {
+        if (BodyCarried == carried) return;
+        BodyCarried = carried;
+        InventoryChanged?.Invoke();
+    }
     public bool CursorReleased => _cursorReleased;
     public event Action InventoryChanged;
     public event Action<int> SelectionChanged;
@@ -120,7 +127,7 @@ public class AAH_PlayerInventory : MonoBehaviour
     public bool UseSelected()
     {
         var item = SelectedItem;
-        if (item == null || !item.Consumable) return false;
+        if (BodyCarried || item == null || !item.Consumable) return false;
         if (item.SanityRestore > 0)
         {
             if (_sanity == null || _sanity.ApplyChange(item.SanityRestore) <= 0) return false;

@@ -59,6 +59,7 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
 
     private void Awake()
     {
+        AAH_InteractionHints.Center(_prompt);
         _interact = new UnityEngine.InputSystem.InputAction("Room" + _roomNumber.ToString("00") + "Treatment", UnityEngine.InputSystem.InputActionType.Button, "<Keyboard>/e");
         _interact.performed += HandleInteract;
         BuildOutline(new[] { _scan }, _scanOutline);
@@ -79,7 +80,7 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
     {
         if (roomNumber != _roomNumber || _checkIn == null) return;
         var actor = _checkIn.CurrentPatient;
-        if (actor == null || actor == _patient || (!string.IsNullOrEmpty(_patientId) && actor.PatientId != _patientId)) return;
+        if (actor == null || actor == _patient || ((AAH_GameManager.Instance == null || AAH_GameManager.Instance.currentDay != 2) && !string.IsNullOrEmpty(_patientId) && actor.PatientId != _patientId)) return;
         if (Stage != TreatmentStage.WaitingForBed && Stage != TreatmentStage.Discharged) return;
         ResetPatientDelivery();
         foreach (var outline in _patientOutline) if (outline != null) Destroy(outline);
@@ -108,6 +109,28 @@ public partial class AAH_RoomTreatmentSequence : MonoBehaviour
             _prompt.text = IsFocused ? (Stage == TreatmentStage.Patient ? "[E] Khám bệnh nhân" : Stage == TreatmentStage.Scan ? "[E] Phân tích bệnh" : "[E] Phân tích thuốc") : "";
         UpdateDelivery();
     }
+    public void RemoveDeceased(AAH_PatientActor actor)
+    {
+        if (_patient != actor) return;
+        if (_analysis != null) { StopCoroutine(_analysis); _analysis = null; }
+        ResetPatientDelivery();
+        foreach (var outline in _patientOutline) if (outline != null) Destroy(outline);
+        _patientOutline.Clear();
+        if (_patientCollider != null) { _patientCollider.enabled = false; Destroy(_patientCollider.gameObject); }
+        _patientCollider = null;
+        _patient = null;
+        Progress = 0f;
+        IsFocused = false;
+        Stage = TreatmentStage.WaitingForBed;
+        SetOutline(_scanOutline, false);
+        SetOutline(_computerOutline, false);
+        ShowMedicineImages(false);
+        if (_progressFill != null) _progressFill.fillAmount = 0f;
+        if (_computerStatus != null) _computerStatus.text = "CHỜ PHÂN TÍCH";
+        if (_medicineText != null) _medicineText.text = "CHỜ BỆNH NHÂN";
+        if (_prompt != null) _prompt.text = "";
+    }
+
     private void PreparePatient()
     {
         // Actor root remains at the navigation endpoint; imported visual moves onto the bed.

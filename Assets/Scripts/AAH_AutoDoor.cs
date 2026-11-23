@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public class AAH_AutoDoor : MonoBehaviour
+public class AAH_AutoDoor : MonoBehaviour, IAAH_PlayerDoor
 {
     [Header("References")]
     [SerializeField] private Transform _player;
@@ -14,7 +14,6 @@ public class AAH_AutoDoor : MonoBehaviour
     [SerializeField] private float _openAngle = 90f;
     [SerializeField, Min(1f)] private float _openSpeed = 100f;
 
-    private UnityEngine.InputSystem.InputAction _interactAction;
     private Vector3 _closedPosition;
     private Quaternion _closedRotation;
     private Vector3 _hingePosition;
@@ -22,8 +21,10 @@ public class AAH_AutoDoor : MonoBehaviour
     private float _currentAngle;
     private bool _isOpen;
 
+    public Transform Panel => _door;
+    public bool CanPlayerToggle => _door != null && _hinge != null;
     public bool IsOpen => _isOpen;
-    public bool CanInteract => !_isOpen && _player != null && _interactionPoint != null
+    public bool CanInteract => _player != null && _interactionPoint != null
         && Vector3.Distance(_player.position, _interactionPoint.position) <= _interactionDistance
         && Time.timeScale > 0f;
 
@@ -41,24 +42,23 @@ public class AAH_AutoDoor : MonoBehaviour
         _closedRotation = _door.rotation;
         _hingePosition = _hinge.position;
         _hingeAxis = _hinge.up;
-        _interactAction = new UnityEngine.InputSystem.InputAction("OpenReceptionDoor",
-            UnityEngine.InputSystem.InputActionType.Button, "<Keyboard>/e");
-        _interactAction.performed += OnInteract;
         if (_prompt != null) _prompt.SetActive(false);
     }
 
-    private void OnEnable()
+    private void Start()
     {
-        _interactAction?.Enable();
+        // The reception door already references the player in the hospital scenes.
+        var fps = _player.GetComponentInParent<SC_FPSController>();
+        if (fps == null) fps = _player.GetComponentInChildren<SC_FPSController>();
+        if (fps != null && fps.GetComponentInChildren<AAH_PlayerDoorInteractor>(true) == null)
+            fps.gameObject.AddComponent<AAH_PlayerDoorInteractor>();
     }
 
     private void Update()
     {
-        if (_prompt != null && _prompt.activeSelf != CanInteract)
-            _prompt.SetActive(CanInteract);
-
-        if (!_isOpen) return;
-        _currentAngle = Mathf.MoveTowards(_currentAngle, _openAngle, _openSpeed * Time.deltaTime);
+        float targetAngle = _isOpen ? _openAngle : 0f;
+        if (Mathf.Approximately(_currentAngle, targetAngle)) return;
+        _currentAngle = Mathf.MoveTowards(_currentAngle, targetAngle, _openSpeed * Time.deltaTime);
         Quaternion rotation = Quaternion.AngleAxis(_currentAngle, _hingeAxis);
         _door.SetPositionAndRotation(_hingePosition + rotation * (_closedPosition - _hingePosition),
             rotation * _closedRotation);
@@ -71,23 +71,10 @@ public class AAH_AutoDoor : MonoBehaviour
         if (_prompt != null) _prompt.SetActive(false);
     }
 
-    private void OnInteract(UnityEngine.InputSystem.InputAction.CallbackContext context)
+    public void ToggleFromPlayer()
     {
-        if (!CanInteract) return;
-        OpenForPatient();
+        if (CanPlayerToggle) _isOpen = !_isOpen;
     }
 
-    private void OnDisable()
-    {
-        _interactAction?.Disable();
-        if (_prompt != null) _prompt.SetActive(false);
-    }
-
-    private void OnDestroy()
-    {
-        if (_interactAction == null) return;
-        _interactAction.performed -= OnInteract;
-        _interactAction.Dispose();
-    }
+    public void RequestClose() { _isOpen = false; }
 }
-

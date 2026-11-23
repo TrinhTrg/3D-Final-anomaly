@@ -18,6 +18,7 @@ public class AAH_CoffeeMachine : MonoBehaviour
     [SerializeField] private AAH_PlayerInventory _inventory;
     [SerializeField] private AAH_ItemDefinition _coffeeItem;
     private UnityEngine.InputSystem.InputAction _takeCoffee;
+    private AAH_FocusOutline _outline;
     private float _holdElapsed;
     private float _inventoryFullTimer;
     private int _lastSecond = -1;
@@ -28,6 +29,8 @@ public class AAH_CoffeeMachine : MonoBehaviour
     public int CupsTaken { get; private set; }
     private void Awake()
     {
+        AAH_InteractionHints.Center(_interactionPrompt);
+        if (_machineCollider != null) _outline = new AAH_FocusOutline(_machineCollider.transform);
         _takeCoffee = new UnityEngine.InputSystem.InputAction("TakeCoffee", UnityEngine.InputSystem.InputActionType.Button, "<Keyboard>/e");
         _takeCoffee.started += HandleHoldStarted;
         _takeCoffee.canceled += HandleHoldCanceled;
@@ -38,7 +41,7 @@ public class AAH_CoffeeMachine : MonoBehaviour
     private void HandleHoldCanceled(UnityEngine.InputSystem.InputAction.CallbackContext context) { _holdElapsed = 0f; }
     private bool CanFocus()
     {
-        if (_playerCamera == null || _machineCollider == null || Time.timeScale <= 0f || (_checkIn != null && _checkIn.BlocksWorldInteraction)) return false;
+        if ((_inventory != null && _inventory.BodyCarried) || _playerCamera == null || _machineCollider == null || Time.timeScale <= 0f || (_checkIn != null && _checkIn.BlocksWorldInteraction)) return false;
         RaycastHit hit;
         return Physics.Raycast(_playerCamera.transform.position, _playerCamera.transform.forward, out hit, _interactionDistance, ~0, QueryTriggerInteraction.Ignore)
             && hit.collider == _machineCollider;
@@ -46,6 +49,7 @@ public class AAH_CoffeeMachine : MonoBehaviour
     private void Update()
     {
         IsFocused = CanFocus();
+        _outline?.Show(IsFocused);
         if (_inventoryFullTimer > 0f) _inventoryFullTimer -= Time.deltaTime;
         if (!IsReady)
         {
@@ -82,7 +86,8 @@ public class AAH_CoffeeMachine : MonoBehaviour
         if (!IsReady) return;
         _holdElapsed = 0f;
         // Only start brewing when the cup actually went into the inventory.
-        if (_inventory == null || !_inventory.TryAdd(_coffeeItem)) { _inventoryFullTimer = 2f; return; }
+        if (_inventory == null || !_inventory.TryAdd(_coffeeItem, out int slot)) { _inventoryFullTimer = 2f; return; }
+        _inventory.Select(slot);
         CupsTaken++;
         IsReady = false; RemainingSeconds = _brewDuration;
         UpdateStatus();
@@ -96,11 +101,13 @@ public class AAH_CoffeeMachine : MonoBehaviour
     }
     private void OnDisable()
     {
+        _outline?.Show(false);
         _takeCoffee?.Disable(); _holdElapsed = 0f;
         if (_interactionPrompt != null) _interactionPrompt.gameObject.SetActive(false);
     }
     private void OnDestroy()
     {
+        _outline?.Dispose();
         if (_takeCoffee == null) return;
         _takeCoffee.started -= HandleHoldStarted; _takeCoffee.canceled -= HandleHoldCanceled;
         _takeCoffee.Dispose();
